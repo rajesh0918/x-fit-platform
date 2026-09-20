@@ -186,11 +186,17 @@ def process_squat_video(video_path):
         cap.release()
         detector.close()
 
+    # ------------------------------------------------------------
+    # IMPORTANT:
+    # Views expects rep_quality.
+    # ------------------------------------------------------------
+
     return {
         "exercise": "squat",
         "selected_leg": selected_leg,
         "rep_count": analyzer.rep_count,
         "rep_angles": analyzer.rep_angles,
+        "rep_quality": analyzer.get_rep_quality(),
         "form_score": analyzer.calculate_form_score(),
         "feedback": analyzer.get_feedback(),
         "processed_frames": processed_frames,
@@ -648,8 +654,8 @@ def process_bicep_curl_video(video_path):
                 # ------------------------------------------------
                 # Calculate elbow angle
                 #
-                # We intentionally do NOT reject the frame
-                # because one landmark has low visibility.
+                # We intentionally don't reject the frame based
+                # on individual MoveNet visibility values.
                 # ------------------------------------------------
 
                 elbow_angle = calculate_angle(
@@ -690,11 +696,8 @@ def process_bicep_curl_video(video_path):
         detector.close()
 
     # ------------------------------------------------------------
-    # Return bicep results
-    #
     # IMPORTANT:
-    # Use analyzer.rep_data.
-    # Do NOT use analyzer.rep_angles.
+    # BicepCurlAnalyzer uses rep_data.
     # ------------------------------------------------------------
 
     return {
