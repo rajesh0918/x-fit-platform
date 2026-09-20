@@ -20,7 +20,7 @@ function MotionCheckComparison() {
     const loadHistory = async () => {
       try {
         const response = await fetch(
-          "http://127.0.0.1:8000/api/motioncheck/history/",
+    `${import.meta.env.VITE_API_BASE_URL}/motioncheck/history/`,
           {
             headers: {
               Authorization: `Bearer ${accessToken}`,

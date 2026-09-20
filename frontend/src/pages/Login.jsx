@@ -123,7 +123,7 @@ function Login() {
       // ==================================================
 
       const workoutResponse = await fetch(
-        "http://127.0.0.1:8000/api/workouts/active/",
+    `${import.meta.env.VITE_API_BASE_URL}/workouts/active/`,
         {
           headers,
         }
