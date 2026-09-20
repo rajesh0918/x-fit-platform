@@ -86,11 +86,11 @@ function Login() {
       // ==================================================
 
       const profileResponse = await fetch(
-        "http://127.0.0.1:8000/api/profile/",
-        {
-          headers,
-        }
-      );
+    `${import.meta.env.VITE_API_BASE_URL}/profile/`,
+    {
+        headers,
+    }
+);
 
       let profile = null;
 
