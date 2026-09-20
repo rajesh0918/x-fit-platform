@@ -193,15 +193,23 @@ MAILERS = {
 # ==================================================
 
 CORS_ALLOWED_ORIGINS = [
-    origin.strip()
-    for origin in os.getenv(
-        "CORS_ALLOWED_ORIGINS",
-        "http://localhost:5173,"
-        "http://127.0.0.1:5173,"
-        "https://x-fit-frontend.vercel.app",
-    ).split(",")
-    if origin.strip()
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://x-fit-frontend.vercel.app",
 ]
+
+# Add any extra origins from environment variables
+extra_cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", "")
+
+if extra_cors_origins:
+    CORS_ALLOWED_ORIGINS.extend(
+        origin.strip()
+        for origin in extra_cors_origins.split(",")
+        if origin.strip()
+    )
+
+# Remove duplicates
+CORS_ALLOWED_ORIGINS = list(dict.fromkeys(CORS_ALLOWED_ORIGINS))
 
 
 # ==================================================
