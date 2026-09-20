@@ -1,0 +1,25 @@
+FROM python:3.12-slim-bookworm
+
+WORKDIR /app
+
+# Linux libraries required by MediaPipe/OpenCV
+RUN apt-get update && apt-get install -y \
+    libegl1 \
+    libgl1 \
+    libglib2.0-0 \
+    libgomp1 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    libportaudio2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy project
+COPY . .
+
+# Vercel provides PORT
+CMD gunicorn --bind 0.0.0.0:${PORT:-8000} backend.wsgi:application
