@@ -307,7 +307,7 @@ function Checkout() {
       */
 
       const response = await apiFetch(
-        "/shop/orders/create/",
+        "/shop/orders/",
         {
           method: "POST",
 
