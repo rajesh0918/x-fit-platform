@@ -9,15 +9,23 @@ class SquatAnalyzer:
         self.current_rep_min_angle = 180
         self.rep_angles = []
 
+        # Diagnostic information
+        self.frame_count = 0
+        self.debug_data = []
+
     def analyze(self, hip, knee, ankle):
+
         knee_angle = calculate_angle(
             hip,
             knee,
             ankle
         )
 
-        # Reject noisy / unrealistic values
+        self.frame_count += 1
+
+        # Reject unrealistic values
         if knee_angle < 25 or knee_angle > 180:
+
             return {
                 "valid": False,
                 "knee_angle": round(knee_angle, 2),
@@ -25,32 +33,39 @@ class SquatAnalyzer:
                 "rep_count": self.rep_count,
             }
 
-        # Track deepest knee angle during the current rep
+        previous_state = self.state
+
+        # Track deepest point
         if knee_angle < self.current_rep_min_angle:
             self.current_rep_min_angle = knee_angle
 
-        # -------------------------
-        # SQUAT STATE MACHINE
-        # -------------------------
+        # ==================================================
+        # STATE MACHINE
+        # ==================================================
 
         if self.state == "standing":
-            if knee_angle < 155:
+
+            if knee_angle < 160:
                 self.state = "descending"
 
         elif self.state == "descending":
-            if knee_angle < 110:
+
+            if knee_angle < 120:
                 self.state = "bottom"
 
-            elif knee_angle > 165:
+            elif knee_angle > 160:
                 self.current_rep_min_angle = 180
                 self.state = "standing"
 
         elif self.state == "bottom":
-            if knee_angle > 125:
+
+            if knee_angle > 130:
                 self.state = "ascending"
 
         elif self.state == "ascending":
-            if knee_angle > 155:
+
+            if knee_angle > 145:
+
                 self.rep_count += 1
 
                 self.rep_angles.append(
@@ -58,7 +73,22 @@ class SquatAnalyzer:
                 )
 
                 self.current_rep_min_angle = 180
+
                 self.state = "standing"
+
+        # ==================================================
+        # SAVE ONLY IMPORTANT STATE CHANGES
+        # ==================================================
+
+        if previous_state != self.state:
+
+            self.debug_data.append({
+                "frame": self.frame_count,
+                "angle": round(knee_angle, 2),
+                "from": previous_state,
+                "to": self.state,
+                "rep_count": self.rep_count,
+            })
 
         return {
             "valid": True,
@@ -67,13 +97,26 @@ class SquatAnalyzer:
             "rep_count": self.rep_count,
         }
 
+    # ==================================================
+    # DEBUG INFORMATION
+    # ==================================================
+
+    def get_debug_data(self):
+        return self.debug_data
+
+    # ==================================================
+    # REP QUALITY
+    # ==================================================
+
     def get_rep_quality(self):
+
         results = []
 
         for index, angle in enumerate(
             self.rep_angles,
             start=1
         ):
+
             if angle <= 90:
                 quality = "good_depth"
 
@@ -91,7 +134,12 @@ class SquatAnalyzer:
 
         return results
 
+    # ==================================================
+    # FEEDBACK
+    # ==================================================
+
     def get_feedback(self):
+
         feedback = []
 
         if not self.rep_angles:
@@ -106,6 +154,7 @@ class SquatAnalyzer:
         good_reps = len(self.rep_angles) - shallow_reps
 
         if shallow_reps > 0:
+
             feedback.append({
                 "type": "shallow_depth",
                 "what": (
@@ -123,6 +172,7 @@ class SquatAnalyzer:
             })
 
         if good_reps > 0:
+
             feedback.append({
                 "type": "good_depth",
                 "what": (
@@ -140,7 +190,12 @@ class SquatAnalyzer:
 
         return feedback
 
+    # ==================================================
+    # FORM SCORE
+    # ==================================================
+
     def calculate_form_score(self):
+
         if not self.rep_angles:
             return 0
 
@@ -164,7 +219,6 @@ class SquatAnalyzer:
             if angle > 105
         )
 
-        # Simple explainable MVP scoring
         earned_points = (
             good_reps * 100
             + acceptable_reps * 80

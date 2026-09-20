@@ -7,29 +7,42 @@ from .pushup_analyzer import PushUpAnalyzer
 from .bicep_curl_analyzer import BicepCurlAnalyzer
 
 
-# ==================================================
-# HELPERS
-# ==================================================
+# ============================================================
+# HELPER FUNCTIONS
+# ============================================================
 
 def get_point(landmark):
+    """
+    Convert a landmark object into an (x, y) tuple.
+    """
     return (
         landmark.x,
         landmark.y
     )
 
 
-def get_visibility(*landmarks):
-    return min(
-        landmark.visibility
-        for landmark in landmarks
+def get_visibility(landmark):
+    """
+    Get landmark confidence / visibility.
+    """
+    return float(
+        getattr(
+            landmark,
+            "visibility",
+            0.0
+        )
     )
 
 
-# ==================================================
+# ============================================================
 # SQUAT
-# ==================================================
+# ============================================================
 
 def process_squat_video(video_path):
+    """
+    Process a squat video using MoveNet.
+    """
+
     detector = PoseDetector()
     analyzer = SquatAnalyzer()
 
@@ -38,109 +51,163 @@ def process_squat_video(video_path):
     if not cap.isOpened():
         detector.close()
         raise ValueError(
-            f"Could not open video file: {video_path}"
+            f"Could not open video: {video_path}"
         )
 
-    fps = cap.get(cv2.CAP_PROP_FPS)
-
-    if not fps or fps <= 0:
-        fps = 30
-
-    frame_index = 0
     processed_frames = 0
     skipped_frames = 0
 
-    try:
-        while True:
-            success, frame = cap.read()
+    selected_leg = None
 
-            if not success:
+    try:
+
+        while True:
+
+            ret, frame = cap.read()
+
+            if not ret:
                 break
 
-            timestamp_ms = int(
-                (frame_index / fps) * 1000
-            )
+            try:
 
-            frame_index += 1
+                result = detector.process_frame(frame)
 
-            result = detector.process_frame(
-                frame,
-                timestamp_ms
-            )
+                if not result.pose_landmarks:
+                    skipped_frames += 1
+                    continue
 
-            if not result.pose_landmarks:
+                landmarks = result.pose_landmarks[0]
+
+                # ------------------------------------------------
+                # Select the better visible leg
+                # ------------------------------------------------
+
+                if selected_leg is None:
+
+                    left_visibility = min(
+                        get_visibility(
+                            landmarks[PoseDetector.LEFT_HIP]
+                        ),
+                        get_visibility(
+                            landmarks[PoseDetector.LEFT_KNEE]
+                        ),
+                        get_visibility(
+                            landmarks[PoseDetector.LEFT_ANKLE]
+                        )
+                    )
+
+                    right_visibility = min(
+                        get_visibility(
+                            landmarks[PoseDetector.RIGHT_HIP]
+                        ),
+                        get_visibility(
+                            landmarks[PoseDetector.RIGHT_KNEE]
+                        ),
+                        get_visibility(
+                            landmarks[PoseDetector.RIGHT_ANKLE]
+                        )
+                    )
+
+                    if (
+                        left_visibility >= 0.40
+                        and left_visibility >= right_visibility
+                    ):
+                        selected_leg = "left"
+
+                    elif right_visibility >= 0.40:
+                        selected_leg = "right"
+
+                    else:
+                        skipped_frames += 1
+                        continue
+
+                # ------------------------------------------------
+                # Get selected leg
+                # ------------------------------------------------
+
+                if selected_leg == "left":
+
+                    hip = landmarks[
+                        PoseDetector.LEFT_HIP
+                    ]
+
+                    knee = landmarks[
+                        PoseDetector.LEFT_KNEE
+                    ]
+
+                    ankle = landmarks[
+                        PoseDetector.LEFT_ANKLE
+                    ]
+
+                else:
+
+                    hip = landmarks[
+                        PoseDetector.RIGHT_HIP
+                    ]
+
+                    knee = landmarks[
+                        PoseDetector.RIGHT_KNEE
+                    ]
+
+                    ankle = landmarks[
+                        PoseDetector.RIGHT_ANKLE
+                    ]
+
+                # ------------------------------------------------
+                # Visibility check
+                # ------------------------------------------------
+
+                if (
+                    get_visibility(hip) < 0.20
+                    or get_visibility(knee) < 0.20
+                    or get_visibility(ankle) < 0.20
+                ):
+                    skipped_frames += 1
+                    continue
+
+                # ------------------------------------------------
+                # Analyze squat
+                # ------------------------------------------------
+
+                analyzer.analyze(
+                    get_point(hip),
+                    get_point(knee),
+                    get_point(ankle)
+                )
+
+                processed_frames += 1
+
+            except Exception:
                 skipped_frames += 1
                 continue
-
-            landmarks = result.pose_landmarks[0]
-
-            hip_landmark = landmarks[24]
-            knee_landmark = landmarks[26]
-            ankle_landmark = landmarks[28]
-
-            visibility = get_visibility(
-                hip_landmark,
-                knee_landmark,
-                ankle_landmark
-            )
-
-            if visibility < 0.40:
-                skipped_frames += 1
-                continue
-
-            hip = get_point(hip_landmark)
-            knee = get_point(knee_landmark)
-            ankle = get_point(ankle_landmark)
-
-            analysis = analyzer.analyze(
-                hip,
-                knee,
-                ankle
-            )
-
-            if not analysis["valid"]:
-                skipped_frames += 1
-                continue
-
-            processed_frames += 1
 
     finally:
+
         cap.release()
         detector.close()
 
     return {
         "exercise": "squat",
-
-        "rep_count":
-            analyzer.rep_count,
-
-        "rep_angles": [
-            round(angle, 2)
-            for angle in analyzer.rep_angles
-        ],
-
-        "rep_quality":
-            analyzer.get_rep_quality(),
-
-        "form_score":
-            analyzer.calculate_form_score(),
-
-        "feedback":
-            analyzer.get_feedback(),
-
-        "processed_frames":
-            processed_frames,
-
-        "skipped_frames":
-            skipped_frames,
+        "selected_leg": selected_leg,
+        "rep_count": analyzer.rep_count,
+        "rep_angles": analyzer.rep_angles,
+        "form_score": analyzer.calculate_form_score(),
+        "feedback": analyzer.get_feedback(),
+        "processed_frames": processed_frames,
+        "skipped_frames": skipped_frames,
+        "debug": analyzer.get_debug_data(),
     }
 
 
-# ==================================================
+# ============================================================
 # PUSH-UP
-# ==================================================
+# ============================================================
 
 def process_pushup_video(video_path):
+    """
+    Process a push-up video using MoveNet.
+    """
+
     detector = PoseDetector()
     analyzer = PushUpAnalyzer()
 
@@ -149,435 +216,496 @@ def process_pushup_video(video_path):
     if not cap.isOpened():
         detector.close()
         raise ValueError(
-            f"Could not open video file: {video_path}"
+            f"Could not open video: {video_path}"
         )
 
-    fps = cap.get(cv2.CAP_PROP_FPS)
-
-    if not fps or fps <= 0:
-        fps = 30
-
-    frame_index = 0
     processed_frames = 0
     skipped_frames = 0
 
-    try:
-        while True:
-            success, frame = cap.read()
+    selected_arm = None
 
-            if not success:
+    try:
+
+        while True:
+
+            ret, frame = cap.read()
+
+            if not ret:
                 break
 
-            timestamp_ms = int(
-                (frame_index / fps) * 1000
-            )
+            try:
 
-            frame_index += 1
+                result = detector.process_frame(frame)
 
-            result = detector.process_frame(
-                frame,
-                timestamp_ms
-            )
+                if not result.pose_landmarks:
+                    skipped_frames += 1
+                    continue
 
-            if not result.pose_landmarks:
+                landmarks = result.pose_landmarks[0]
+
+                # ------------------------------------------------
+                # Select arm
+                # ------------------------------------------------
+
+                if selected_arm is None:
+
+                    left_visibility = min(
+                        get_visibility(
+                            landmarks[PoseDetector.LEFT_SHOULDER]
+                        ),
+                        get_visibility(
+                            landmarks[PoseDetector.LEFT_ELBOW]
+                        ),
+                        get_visibility(
+                            landmarks[PoseDetector.LEFT_WRIST]
+                        )
+                    )
+
+                    right_visibility = min(
+                        get_visibility(
+                            landmarks[PoseDetector.RIGHT_SHOULDER]
+                        ),
+                        get_visibility(
+                            landmarks[PoseDetector.RIGHT_ELBOW]
+                        ),
+                        get_visibility(
+                            landmarks[PoseDetector.RIGHT_WRIST]
+                        )
+                    )
+
+                    if (
+                        left_visibility >= 0.10
+                        and left_visibility >= right_visibility
+                    ):
+                        selected_arm = "left"
+
+                    elif right_visibility >= 0.10:
+                        selected_arm = "right"
+
+                    else:
+                        skipped_frames += 1
+                        continue
+
+                # ------------------------------------------------
+                # Get selected arm
+                # ------------------------------------------------
+
+                if selected_arm == "left":
+
+                    shoulder = landmarks[
+                        PoseDetector.LEFT_SHOULDER
+                    ]
+
+                    elbow = landmarks[
+                        PoseDetector.LEFT_ELBOW
+                    ]
+
+                    wrist = landmarks[
+                        PoseDetector.LEFT_WRIST
+                    ]
+
+                else:
+
+                    shoulder = landmarks[
+                        PoseDetector.RIGHT_SHOULDER
+                    ]
+
+                    elbow = landmarks[
+                        PoseDetector.RIGHT_ELBOW
+                    ]
+
+                    wrist = landmarks[
+                        PoseDetector.RIGHT_WRIST
+                    ]
+
+                # ------------------------------------------------
+                # Visibility check
+                # ------------------------------------------------
+
+                if (
+                    get_visibility(shoulder) < 0.10
+                    or get_visibility(elbow) < 0.10
+                    or get_visibility(wrist) < 0.10
+                ):
+                    skipped_frames += 1
+                    continue
+
+                # ------------------------------------------------
+                # Analyze push-up
+                # ------------------------------------------------
+
+                analyzer.analyze(
+                    get_point(shoulder),
+                    get_point(elbow),
+                    get_point(wrist)
+                )
+
+                processed_frames += 1
+
+            except Exception:
                 skipped_frames += 1
                 continue
 
-            landmarks = result.pose_landmarks[0]
+        # --------------------------------------------------------
+        # Finalize last rep
+        # --------------------------------------------------------
 
-            shoulder_landmark = landmarks[12]
-            elbow_landmark = landmarks[14]
-            wrist_landmark = landmarks[16]
-
-            visibility = get_visibility(
-                shoulder_landmark,
-                elbow_landmark,
-                wrist_landmark
-            )
-
-            if visibility < 0.40:
-                skipped_frames += 1
-                continue
-
-            shoulder = get_point(
-                shoulder_landmark
-            )
-
-            elbow = get_point(
-                elbow_landmark
-            )
-
-            wrist = get_point(
-                wrist_landmark
-            )
-
-            analysis = analyzer.analyze(
-                shoulder,
-                elbow,
-                wrist
-            )
-
-            if not analysis["valid"]:
-                skipped_frames += 1
-                continue
-
-            processed_frames += 1
+        analyzer.finalize_video()
 
     finally:
+
         cap.release()
         detector.close()
 
-    analyzer.finalize_video()
-
     return {
         "exercise": "pushup",
-
-        "rep_count":
-            analyzer.rep_count,
-
-        "rep_angles": [
-            round(angle, 2)
-            for angle in analyzer.rep_angles
-        ],
-
-        "rep_quality":
-            analyzer.get_rep_quality(),
-
-        "form_score":
-            analyzer.calculate_form_score(),
-
-        "feedback":
-            analyzer.get_feedback(),
-
-        "processed_frames":
-            processed_frames,
-
-        "skipped_frames":
-            skipped_frames,
+        "selected_arm": selected_arm,
+        "rep_count": analyzer.rep_count,
+        "rep_angles": analyzer.rep_angles,
+        "rep_quality": analyzer.get_rep_quality(),
+        "form_score": analyzer.calculate_form_score(),
+        "feedback": analyzer.get_feedback(),
+        "processed_frames": processed_frames,
+        "skipped_frames": skipped_frames,
     }
 
 
-# ==================================================
-# ACTIVE CURL ARM DETECTION
-# ==================================================
+# ============================================================
+# BICEP CURL - ACTIVE ARM DETECTION
+# ============================================================
 
 def detect_active_curl_arm(video_path):
+    """
+    Detect which arm is performing the curl.
+
+    Uses elbow-angle movement over the video.
+    """
+
     detector = PoseDetector()
+
     cap = cv2.VideoCapture(video_path)
 
     if not cap.isOpened():
         detector.close()
-
         raise ValueError(
-            f"Could not open video file: {video_path}"
+            f"Could not open video: {video_path}"
         )
-
-    fps = cap.get(cv2.CAP_PROP_FPS)
-
-    if not fps or fps <= 0:
-        fps = 30
-
-    frame_index = 0
 
     left_angles = []
     right_angles = []
 
     try:
-        while True:
-            success, frame = cap.read()
 
-            if not success:
+        while True:
+
+            ret, frame = cap.read()
+
+            if not ret:
                 break
 
-            timestamp_ms = int(
-                (frame_index / fps) * 1000
-            )
+            try:
 
-            frame_index += 1
+                result = detector.process_frame(frame)
 
-            result = detector.process_frame(
-                frame,
-                timestamp_ms
-            )
+                if not result.pose_landmarks:
+                    continue
 
-            if not result.pose_landmarks:
+                landmarks = result.pose_landmarks[0]
+
+                # ------------------------------------------------
+                # LEFT ARM
+                # ------------------------------------------------
+
+                left_shoulder = landmarks[
+                    PoseDetector.LEFT_SHOULDER
+                ]
+
+                left_elbow = landmarks[
+                    PoseDetector.LEFT_ELBOW
+                ]
+
+                left_wrist = landmarks[
+                    PoseDetector.LEFT_WRIST
+                ]
+
+                left_visibility = min(
+                    get_visibility(left_shoulder),
+                    get_visibility(left_elbow),
+                    get_visibility(left_wrist)
+                )
+
+                if left_visibility >= 0.10:
+
+                    left_angle = calculate_angle(
+                        get_point(left_shoulder),
+                        get_point(left_elbow),
+                        get_point(left_wrist)
+                    )
+
+                    if 20 <= left_angle <= 180:
+
+                        left_angles.append(
+                            left_angle
+                        )
+
+                # ------------------------------------------------
+                # RIGHT ARM
+                # ------------------------------------------------
+
+                right_shoulder = landmarks[
+                    PoseDetector.RIGHT_SHOULDER
+                ]
+
+                right_elbow = landmarks[
+                    PoseDetector.RIGHT_ELBOW
+                ]
+
+                right_wrist = landmarks[
+                    PoseDetector.RIGHT_WRIST
+                ]
+
+                right_visibility = min(
+                    get_visibility(right_shoulder),
+                    get_visibility(right_elbow),
+                    get_visibility(right_wrist)
+                )
+
+                if right_visibility >= 0.10:
+
+                    right_angle = calculate_angle(
+                        get_point(right_shoulder),
+                        get_point(right_elbow),
+                        get_point(right_wrist)
+                    )
+
+                    if 20 <= right_angle <= 180:
+
+                        right_angles.append(
+                            right_angle
+                        )
+
+            except Exception:
                 continue
 
-            landmarks = result.pose_landmarks[0]
-
-            # LEFT ARM
-            left_shoulder = landmarks[11]
-            left_elbow = landmarks[13]
-            left_wrist = landmarks[15]
-
-            left_visibility = get_visibility(
-                left_shoulder,
-                left_elbow,
-                left_wrist
-            )
-
-            if left_visibility >= 0.15:
-                left_angle = calculate_angle(
-                    get_point(left_shoulder),
-                    get_point(left_elbow),
-                    get_point(left_wrist)
-                )
-
-                if 25 <= left_angle <= 180:
-                    left_angles.append(
-                        left_angle
-                    )
-
-            # RIGHT ARM
-            right_shoulder = landmarks[12]
-            right_elbow = landmarks[14]
-            right_wrist = landmarks[16]
-
-            right_visibility = get_visibility(
-                right_shoulder,
-                right_elbow,
-                right_wrist
-            )
-
-            if right_visibility >= 0.15:
-                right_angle = calculate_angle(
-                    get_point(right_shoulder),
-                    get_point(right_elbow),
-                    get_point(right_wrist)
-                )
-
-                if 25 <= right_angle <= 180:
-                    right_angles.append(
-                        right_angle
-                    )
-
     finally:
+
         cap.release()
         detector.close()
 
-    def movement_score(angles):
-        if len(angles) < 10:
-            return 0
+    # ------------------------------------------------------------
+    # Calculate movement range
+    # ------------------------------------------------------------
 
-        sorted_angles = sorted(
-            angles
-        )
+    def calculate_movement(angles):
 
-        lower_index = int(
-            len(sorted_angles) * 0.10
-        )
+        if len(angles) < 5:
+            return 0.0
 
-        upper_index = int(
-            len(sorted_angles) * 0.90
-        )
+        minimum = min(angles)
+        maximum = max(angles)
 
-        low = sorted_angles[
-            lower_index
-        ]
+        return maximum - minimum
 
-        high = sorted_angles[
-            min(
-                upper_index,
-                len(sorted_angles) - 1
-            )
-        ]
-
-        movement_range = (
-            high - low
-        )
-
-        coverage_bonus = min(
-            len(angles) / 100,
-            1
-        )
-
-        return (
-            movement_range *
-            coverage_bonus
-        )
-
-    left_score = movement_score(
+    left_movement = calculate_movement(
         left_angles
     )
 
-    right_score = movement_score(
+    right_movement = calculate_movement(
         right_angles
     )
 
+    # ------------------------------------------------------------
+    # Select active arm
+    # ------------------------------------------------------------
+
     if (
-        left_score == 0
-        and right_score == 0
+        left_movement == 0
+        and right_movement == 0
     ):
         raise ValueError(
-            "MotionCheck could not confidently detect "
-            "the active curling arm."
+            "Could not detect sufficient arm movement."
         )
 
-    if right_score > left_score:
-        selected_arm = "right"
-    else:
+    if left_movement >= right_movement:
+
         selected_arm = "left"
 
+    else:
+
+        selected_arm = "right"
+
     return {
-        "selected_arm":
-            selected_arm,
-
-        "left_score":
-            round(left_score, 2),
-
-        "right_score":
-            round(right_score, 2),
-
-        "left_samples":
-            len(left_angles),
-
-        "right_samples":
-            len(right_angles),
+        "selected_arm": selected_arm,
+        "left_movement": round(
+            left_movement,
+            2
+        ),
+        "right_movement": round(
+            right_movement,
+            2
+        ),
+        "left_samples": len(left_angles),
+        "right_samples": len(right_angles),
     }
 
 
-# ==================================================
+# ============================================================
 # BICEP CURL
-# ==================================================
+# ============================================================
 
 def process_bicep_curl_video(video_path):
+    """
+    Process a bicep curl video using MoveNet.
+
+    Important:
+    BicepCurlAnalyzer uses `rep_data`.
+    It does NOT use `rep_angles`.
+    """
+
+    # ------------------------------------------------------------
+    # Detect active arm
+    # ------------------------------------------------------------
+
     arm_detection = detect_active_curl_arm(
         video_path
     )
 
-    selected_arm = (
-        arm_detection["selected_arm"]
-    )
+    selected_arm = arm_detection[
+        "selected_arm"
+    ]
+
+    # ------------------------------------------------------------
+    # Create detector and analyzer
+    # ------------------------------------------------------------
 
     detector = PoseDetector()
     analyzer = BicepCurlAnalyzer()
 
-    cap = cv2.VideoCapture(
-        video_path
-    )
+    cap = cv2.VideoCapture(video_path)
 
     if not cap.isOpened():
         detector.close()
-
         raise ValueError(
-            f"Could not open video file: {video_path}"
+            f"Could not open video: {video_path}"
         )
 
-    fps = cap.get(cv2.CAP_PROP_FPS)
-
-    if not fps or fps <= 0:
-        fps = 30
-
-    frame_index = 0
     processed_frames = 0
     skipped_frames = 0
 
     try:
-        while True:
-            success, frame = cap.read()
 
-            if not success:
+        while True:
+
+            ret, frame = cap.read()
+
+            if not ret:
                 break
 
-            timestamp_ms = int(
-                (frame_index / fps) * 1000
-            )
+            try:
 
-            frame_index += 1
+                result = detector.process_frame(
+                    frame
+                )
 
-            result = detector.process_frame(
-                frame,
-                timestamp_ms
-            )
+                if not result.pose_landmarks:
+                    skipped_frames += 1
+                    continue
 
-            if not result.pose_landmarks:
+                landmarks = result.pose_landmarks[0]
+
+                # ------------------------------------------------
+                # Select active arm
+                # ------------------------------------------------
+
+                if selected_arm == "left":
+
+                    shoulder = landmarks[
+                        PoseDetector.LEFT_SHOULDER
+                    ]
+
+                    elbow = landmarks[
+                        PoseDetector.LEFT_ELBOW
+                    ]
+
+                    wrist = landmarks[
+                        PoseDetector.LEFT_WRIST
+                    ]
+
+                else:
+
+                    shoulder = landmarks[
+                        PoseDetector.RIGHT_SHOULDER
+                    ]
+
+                    elbow = landmarks[
+                        PoseDetector.RIGHT_ELBOW
+                    ]
+
+                    wrist = landmarks[
+                        PoseDetector.RIGHT_WRIST
+                    ]
+
+                # ------------------------------------------------
+                # Calculate elbow angle
+                #
+                # We intentionally do NOT reject the frame
+                # because one landmark has low visibility.
+                # ------------------------------------------------
+
+                elbow_angle = calculate_angle(
+                    get_point(shoulder),
+                    get_point(elbow),
+                    get_point(wrist)
+                )
+
+                # ------------------------------------------------
+                # Validate angle
+                # ------------------------------------------------
+
+                if not (
+                    20 <= elbow_angle <= 180
+                ):
+                    skipped_frames += 1
+                    continue
+
+                # ------------------------------------------------
+                # Analyze curl
+                # ------------------------------------------------
+
+                analyzer.analyze(
+                    get_point(shoulder),
+                    get_point(elbow),
+                    get_point(wrist)
+                )
+
+                processed_frames += 1
+
+            except Exception:
                 skipped_frames += 1
                 continue
-
-            landmarks = result.pose_landmarks[0]
-
-            # ----------------------------------
-            # Use detected active arm
-            # ----------------------------------
-
-            if selected_arm == "right":
-                shoulder_landmark = landmarks[12]
-                elbow_landmark = landmarks[14]
-                wrist_landmark = landmarks[16]
-
-            else:
-                shoulder_landmark = landmarks[11]
-                elbow_landmark = landmarks[13]
-                wrist_landmark = landmarks[15]
-
-            visibility = get_visibility(
-                shoulder_landmark,
-                elbow_landmark,
-                wrist_landmark
-            )
-
-            # IMPORTANT:
-            # Lowered from 0.18 to 0.10
-            if visibility < 0.10:
-                skipped_frames += 1
-                continue
-
-            shoulder = get_point(
-                shoulder_landmark
-            )
-
-            elbow = get_point(
-                elbow_landmark
-            )
-
-            wrist = get_point(
-                wrist_landmark
-            )
-
-            analysis = analyzer.analyze(
-                shoulder,
-                elbow,
-                wrist
-            )
-
-            if not analysis["valid"]:
-                skipped_frames += 1
-                continue
-
-            processed_frames += 1
 
     finally:
+
         cap.release()
         detector.close()
 
+    # ------------------------------------------------------------
+    # Return bicep results
+    #
+    # IMPORTANT:
+    # Use analyzer.rep_data.
+    # Do NOT use analyzer.rep_angles.
+    # ------------------------------------------------------------
+
     return {
-        "exercise":
-            "bicep_curl",
-
-        "selected_arm":
-            selected_arm,
-
-        "arm_detection":
-            arm_detection,
-
-        "rep_count":
-            analyzer.rep_count,
-
-        "rep_data":
-            analyzer.rep_data,
-
-        "rep_quality":
-            analyzer.get_rep_quality(),
-
-        "form_score":
-            analyzer.calculate_form_score(),
-
-        "feedback":
-            analyzer.get_feedback(),
-
-        "processed_frames":
-            processed_frames,
-
-        "skipped_frames":
-            skipped_frames,
+        "exercise": "bicep_curl",
+        "selected_arm": selected_arm,
+        "arm_detection": arm_detection,
+        "rep_count": analyzer.rep_count,
+        "rep_data": analyzer.rep_data,
+        "rep_quality": analyzer.get_rep_quality(),
+        "form_score": analyzer.calculate_form_score(),
+        "feedback": analyzer.get_feedback(),
+        "processed_frames": processed_frames,
+        "skipped_frames": skipped_frames,
     }
