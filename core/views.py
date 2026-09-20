@@ -2,6 +2,7 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 
 import os
+import tempfile
 import razorpay
 
 from datetime import timedelta
@@ -1057,87 +1058,78 @@ def workout_stats(request):
 @permission_classes([IsAuthenticated])
 def analyze_squat_video(request):
 
-    video_file = request.FILES.get(
-        "video"
-    )
+    video_file = request.FILES.get("video")
 
     if not video_file:
-
         return Response(
-            {
-                "error":
-                    "Video file is required."
-            },
+            {"error": "Video file is required."},
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    analysis = MotionCheckAnalysis.objects.create(
-        user=request.user,
-        exercise="squat",
-        video=video_file,
-    )
+    temp_path = None
+    analysis = None
 
     try:
+        suffix = os.path.splitext(video_file.name)[1] or ".mp4"
 
-        result = process_squat_video(
-            analysis.video.path
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=suffix,
+            dir="/tmp"
+        ) as temp_file:
+            for chunk in video_file.chunks():
+                temp_file.write(chunk)
+
+            temp_path = temp_file.name
+
+        result = process_squat_video(temp_path)
+
+        analysis = MotionCheckAnalysis.objects.create(
+            user=request.user,
+            exercise="squat",
+            rep_count=result["rep_count"],
+            form_score=result["form_score"],
+            feedback=result["feedback"],
+            metric_breakdown={
+                "rep_angles": result["rep_angles"],
+                "rep_quality": result["rep_quality"],
+                "processed_frames": result["processed_frames"],
+                "skipped_frames": result["skipped_frames"],
+            }
         )
 
-        analysis.rep_count = (
-            result["rep_count"]
+        serializer = MotionCheckAnalysisSerializer(
+            analysis,
+            context={"request": request}
         )
 
-        analysis.form_score = (
-            result["form_score"]
+        return Response(
+            serializer.data,
+            status=status.HTTP_201_CREATED
         )
-
-        analysis.feedback = (
-            result["feedback"]
-        )
-
-        analysis.metric_breakdown = {
-            "rep_angles":
-                result["rep_angles"],
-
-            "rep_quality":
-                result["rep_quality"],
-
-            "processed_frames":
-                result["processed_frames"],
-
-            "skipped_frames":
-                result["skipped_frames"],
-        }
-
-        analysis.save()
 
     except Exception as error:
+        print("========================================")
+        print("SQUAT ANALYSIS ERROR:", repr(error))
+        print("========================================")
 
-        analysis.delete()
+        if analysis:
+            analysis.delete()
 
         return Response(
             {
-                "error":
-                    "Video analysis failed.",
-
-                "details":
-                    str(error),
+                "error": "Video analysis failed.",
+                "details": str(error),
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
-    serializer = MotionCheckAnalysisSerializer(
-        analysis,
-
-        context={
-            "request": request
-        }
-    )
-
-    return Response(
-        serializer.data,
-        status=status.HTTP_201_CREATED
-    )
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
 
 
 # ==================================================
@@ -1148,87 +1140,78 @@ def analyze_squat_video(request):
 @permission_classes([IsAuthenticated])
 def analyze_pushup_video(request):
 
-    video_file = request.FILES.get(
-        "video"
-    )
+    video_file = request.FILES.get("video")
 
     if not video_file:
-
         return Response(
-            {
-                "error":
-                    "Video file is required."
-            },
+            {"error": "Video file is required."},
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    analysis = MotionCheckAnalysis.objects.create(
-        user=request.user,
-        exercise="pushup",
-        video=video_file,
-    )
+    temp_path = None
+    analysis = None
 
     try:
+        suffix = os.path.splitext(video_file.name)[1] or ".mp4"
 
-        result = process_pushup_video(
-            analysis.video.path
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=suffix,
+            dir="/tmp"
+        ) as temp_file:
+            for chunk in video_file.chunks():
+                temp_file.write(chunk)
+
+            temp_path = temp_file.name
+
+        result = process_pushup_video(temp_path)
+
+        analysis = MotionCheckAnalysis.objects.create(
+            user=request.user,
+            exercise="pushup",
+            rep_count=result["rep_count"],
+            form_score=result["form_score"],
+            feedback=result["feedback"],
+            metric_breakdown={
+                "rep_angles": result["rep_angles"],
+                "rep_quality": result["rep_quality"],
+                "processed_frames": result["processed_frames"],
+                "skipped_frames": result["skipped_frames"],
+            }
         )
 
-        analysis.rep_count = (
-            result["rep_count"]
+        serializer = MotionCheckAnalysisSerializer(
+            analysis,
+            context={"request": request}
         )
 
-        analysis.form_score = (
-            result["form_score"]
+        return Response(
+            serializer.data,
+            status=status.HTTP_201_CREATED
         )
-
-        analysis.feedback = (
-            result["feedback"]
-        )
-
-        analysis.metric_breakdown = {
-            "rep_angles":
-                result["rep_angles"],
-
-            "rep_quality":
-                result["rep_quality"],
-
-            "processed_frames":
-                result["processed_frames"],
-
-            "skipped_frames":
-                result["skipped_frames"],
-        }
-
-        analysis.save()
 
     except Exception as error:
+        print("========================================")
+        print("PUSH-UP ANALYSIS ERROR:", repr(error))
+        print("========================================")
 
-        analysis.delete()
+        if analysis:
+            analysis.delete()
 
         return Response(
             {
-                "error":
-                    "Push-Up analysis failed.",
-
-                "details":
-                    str(error),
+                "error": "Push-Up analysis failed.",
+                "details": str(error),
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
-    serializer = MotionCheckAnalysisSerializer(
-        analysis,
-
-        context={
-            "request": request
-        }
-    )
-
-    return Response(
-        serializer.data,
-        status=status.HTTP_201_CREATED
-    )
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
 
 
 # ==================================================
@@ -1239,98 +1222,80 @@ def analyze_pushup_video(request):
 @permission_classes([IsAuthenticated])
 def analyze_bicep_curl_video(request):
 
-    video_file = request.FILES.get(
-        "video"
-    )
+    video_file = request.FILES.get("video")
 
     if not video_file:
-
         return Response(
-            {
-                "error":
-                    "Video file is required."
-            },
+            {"error": "Video file is required."},
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    analysis = MotionCheckAnalysis.objects.create(
-        user=request.user,
-        exercise="bicep_curl",
-        video=video_file,
-    )
+    temp_path = None
+    analysis = None
 
     try:
+        suffix = os.path.splitext(video_file.name)[1] or ".mp4"
 
-        result = process_bicep_curl_video(
-            analysis.video.path
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=suffix,
+            dir="/tmp"
+        ) as temp_file:
+            for chunk in video_file.chunks():
+                temp_file.write(chunk)
+
+            temp_path = temp_file.name
+
+        result = process_bicep_curl_video(temp_path)
+
+        analysis = MotionCheckAnalysis.objects.create(
+            user=request.user,
+            exercise="bicep_curl",
+            rep_count=result["rep_count"],
+            form_score=result["form_score"],
+            feedback=result["feedback"],
+            metric_breakdown={
+                "selected_arm": result.get("selected_arm"),
+                "arm_detection": result.get("arm_detection", {}),
+                "rep_data": result["rep_data"],
+                "rep_quality": result["rep_quality"],
+                "processed_frames": result["processed_frames"],
+                "skipped_frames": result["skipped_frames"],
+            }
         )
 
-        analysis.rep_count = (
-            result["rep_count"]
+        serializer = MotionCheckAnalysisSerializer(
+            analysis,
+            context={"request": request}
         )
 
-        analysis.form_score = (
-            result["form_score"]
+        return Response(
+            serializer.data,
+            status=status.HTTP_201_CREATED
         )
-
-        analysis.feedback = (
-            result["feedback"]
-        )
-
-        analysis.metric_breakdown = {
-            "selected_arm":
-                result.get(
-                    "selected_arm"
-                ),
-
-            "arm_detection":
-                result.get(
-                    "arm_detection",
-                    {}
-                ),
-
-            "rep_data":
-                result["rep_data"],
-
-            "rep_quality":
-                result["rep_quality"],
-
-            "processed_frames":
-                result["processed_frames"],
-
-            "skipped_frames":
-                result["skipped_frames"],
-        }
-
-        analysis.save()
 
     except Exception as error:
+        print("========================================")
+        print("BICEP CURL ANALYSIS ERROR:", repr(error))
+        print("========================================")
 
-        analysis.delete()
+        if analysis:
+            analysis.delete()
 
         return Response(
             {
-                "error":
-                    "Bicep Curl analysis failed.",
-
-                "details":
-                    str(error),
+                "error": "Bicep Curl analysis failed.",
+                "details": str(error),
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
-    serializer = MotionCheckAnalysisSerializer(
-        analysis,
-
-        context={
-            "request": request
-        }
-    )
-
-    return Response(
-        serializer.data,
-        status=status.HTTP_201_CREATED
-    )
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
 
 
 # ==================================================
