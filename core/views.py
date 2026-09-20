@@ -67,6 +67,42 @@ class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
     serializer_class = RegisterSerializer
 
+    def create(self, request, *args, **kwargs):
+        try:
+            serializer = self.get_serializer(data=request.data)
+
+            if not serializer.is_valid():
+                return Response(
+                    {
+                        "error": "Registration validation failed.",
+                        "details": serializer.errors
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            self.perform_create(serializer)
+
+            return Response(
+                {
+                    "message": "Registration successful.",
+                    "user": serializer.data
+                },
+                status=status.HTTP_201_CREATED
+            )
+
+        except Exception as error:
+            print("========================================")
+            print("REGISTRATION ERROR:", repr(error))
+            print("========================================")
+
+            return Response(
+                {
+                    "error": "Registration failed.",
+                    "details": str(error)
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
 
 # ==================================================
 # PROFILE
