@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 
 import CinematicBackground from "../components/futuristic/CinematicBackground";
+import { apiFetch } from "../services/api";
 
 
 function Register() {
@@ -96,8 +97,8 @@ function Register() {
 
     try {
       const response =
-        await fetch(
-          "http://127.0.0.1:8000/api/register/",
+        await apiFetch(
+          "/register/",
           {
             method: "POST",
 
