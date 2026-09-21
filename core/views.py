@@ -3086,38 +3086,43 @@ RULES:
             status=status.HTTP_502_BAD_GATEWAY,
         )
     # ==========================================================
-# ==========================================================
-# X-FIT MEMBERSHIP - MANUAL UPI
+# X-FIT MEMBERSHIP / RAZORPAY
 # ==========================================================
 
 MEMBERSHIP_PLANS = {
     "monthly": {
         "name": "X-FIT Monthly",
-        "amount": 100,
+        "amount": 499,
         "days": 30,
     },
-
-    # Keep the existing database key "quarterly"
-    # so no database migration is required.
     "quarterly": {
-        "name": "X-FIT Half-Yearly",
-        "amount": 500,
-        "days": 180,
+        "name": "X-FIT Quarterly",
+        "amount": 1199,
+        "days": 90,
     },
-
     "yearly": {
         "name": "X-FIT Yearly",
-        "amount": 700,
+        "amount": 3999,
         "days": 365,
     },
 }
 
-FREE_TRIAL_DAYS = 30
 
+def get_razorpay_client():
 
-# ==========================================================
-# MEMBERSHIP PLANS
-# ==========================================================
+    key_id = os.getenv("RAZORPAY_KEY_ID")
+    key_secret = os.getenv("RAZORPAY_KEY_SECRET")
+
+    if not key_id or not key_secret:
+        return None
+
+    return razorpay.Client(
+        auth=(
+            key_id,
+            key_secret
+        )
+    )
+
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
@@ -3127,198 +3132,408 @@ def membership_plans(request):
 
     for plan_id, plan in MEMBERSHIP_PLANS.items():
 
-        plans.append(
-            {
-                "id": plan_id,
-                "plan": plan_id,
-                "name": plan["name"],
-                "amount": plan["amount"],
-                "days": plan["days"],
-            }
-        )
+        plans.append({
+            "id": plan_id,
+            "name": plan["name"],
+            "amount": plan["amount"],
+            "currency": "INR",
+            "days": plan["days"],
+        })
 
     return Response(
         {
-            "plans": plans,
-            "free_trial": {
-                "days": FREE_TRIAL_DAYS,
-                "amount": 0,
-                "name": "X-FIT Free Trial",
-            },
+            "plans": plans
         },
-        status=status.HTTP_200_OK,
+        status=status.HTTP_200_OK
     )
 
-
-# ==========================================================
-# OLD RAZORPAY ENDPOINTS - DISABLED
-# ==========================================================
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def create_membership_order(request):
 
-    return Response(
-        {
-            "error":
-                "Razorpay is disabled. X-FIT uses manual UPI payment."
-        },
-        status=status.HTTP_410_GONE,
+    plan_id = request.data.get("plan")
+
+    if plan_id not in MEMBERSHIP_PLANS:
+
+        return Response(
+            {
+                "error": "Invalid membership plan."
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    plan = MEMBERSHIP_PLANS[plan_id]
+
+    razorpay_client = get_razorpay_client()
+
+    if razorpay_client is None:
+
+        return Response(
+            {
+                "error": (
+                    "Razorpay is not configured yet. "
+                    "Add RAZORPAY_KEY_ID and "
+                    "RAZORPAY_KEY_SECRET to the "
+                    "server environment."
+                )
+            },
+            status=status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+
+    amount = plan["amount"]
+
+    membership = Membership.objects.create(
+        user=request.user,
+        plan=plan_id,
+        amount=amount,
+        status="created",
     )
+
+    try:
+
+        razorpay_order = razorpay_client.order.create(
+            {
+                "amount": int(amount * 100),
+                "currency": "INR",
+                "receipt": f"XFIT-{membership.id}",
+                "notes": {
+                    "user_id": str(request.user.id),
+                    "membership_id": str(membership.id),
+                    "plan": plan_id,
+                },
+            }
+        )
+
+        membership.razorpay_order_id = (
+            razorpay_order["id"]
+        )
+
+        membership.save(
+            update_fields=[
+                "razorpay_order_id",
+                "updated_at",
+            ]
+        )
+
+        return Response(
+            {
+                "membership_id": membership.id,
+                "order_id": razorpay_order["id"],
+                "amount": amount,
+                "amount_paise": int(amount * 100),
+                "currency": "INR",
+                "plan": plan_id,
+                "plan_name": plan["name"],
+                "key_id": os.getenv(
+                    "RAZORPAY_KEY_ID"
+                ),
+            },
+            status=status.HTTP_201_CREATED
+        )
+
+    except Exception as error:
+
+        membership.status = "failed"
+
+        membership.save(
+            update_fields=[
+                "status",
+                "updated_at",
+            ]
+        )
+
+        print(
+            "Razorpay order creation error:",
+            error
+        )
+
+        return Response(
+            {
+                "error":
+                    "Unable to create payment order."
+            },
+            status=status.HTTP_502_BAD_GATEWAY
+        )
 
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def verify_membership_payment(request):
 
-    return Response(
-        {
-            "error":
-                "Razorpay verification is disabled. "
-                "Please use the X-FIT UPI payment flow."
-        },
-        status=status.HTTP_410_GONE,
+    membership_id = request.data.get(
+        "membership_id"
     )
 
+    payment_id = request.data.get(
+        "razorpay_payment_id"
+    )
 
-# ==========================================================
-# MEMBERSHIP STATUS
-# ==========================================================
+    returned_order_id = request.data.get(
+        "razorpay_order_id"
+    )
+
+    signature = request.data.get(
+        "razorpay_signature"
+    )
+
+    if not all(
+        [
+            membership_id,
+            payment_id,
+            returned_order_id,
+            signature,
+        ]
+    ):
+
+        return Response(
+            {
+                "error":
+                    "Incomplete payment information."
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    try:
+
+        membership = Membership.objects.get(
+            id=membership_id,
+            user=request.user
+        )
+
+    except Membership.DoesNotExist:
+
+        return Response(
+            {
+                "error":
+                    "Membership order not found."
+            },
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+    if not membership.razorpay_order_id:
+
+        return Response(
+            {
+                "error":
+                    "Membership has no Razorpay order."
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    # IMPORTANT:
+    # Use the order ID stored on our server,
+    # not the order ID supplied by the browser.
+    if returned_order_id != membership.razorpay_order_id:
+
+        return Response(
+            {
+                "error":
+                    "Payment order mismatch."
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    razorpay_client = get_razorpay_client()
+
+    if razorpay_client is None:
+
+        return Response(
+            {
+                "error":
+                    "Razorpay is not configured yet."
+            },
+            status=status.HTTP_503_SERVICE_UNAVAILABLE
+        )
+
+    try:
+
+        razorpay_client.utility.verify_payment_signature(
+            {
+                "razorpay_order_id":
+                    membership.razorpay_order_id,
+
+                "razorpay_payment_id":
+                    payment_id,
+
+                "razorpay_signature":
+                    signature,
+            }
+        )
+
+    except Exception as error:
+
+        print(
+            "Razorpay signature verification failed:",
+            error
+        )
+
+        membership.status = "failed"
+
+        membership.save(
+            update_fields=[
+                "status",
+                "updated_at",
+            ]
+        )
+
+        return Response(
+            {
+                "error":
+                    "Payment verification failed."
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    plan = MEMBERSHIP_PLANS[
+        membership.plan
+    ]
+
+    now = timezone.now()
+
+    # If the user already has an active membership,
+    # extend from the existing expiry date.
+    active_membership = (
+        Membership.objects
+        .filter(
+            user=request.user,
+            status="paid",
+            expires_at__gt=now,
+        )
+        .exclude(id=membership.id)
+        .order_by("-expires_at")
+        .first()
+    )
+
+    if active_membership:
+
+        start_date = active_membership.expires_at
+
+    else:
+
+        start_date = now
+
+    membership.status = "paid"
+
+    membership.razorpay_payment_id = (
+        payment_id
+    )
+
+    membership.razorpay_signature = (
+        signature
+    )
+
+    membership.started_at = start_date
+
+    membership.expires_at = (
+        start_date +
+        timedelta(
+            days=plan["days"]
+        )
+    )
+
+    membership.save()
+
+    return Response(
+        {
+            "success": True,
+            "message":
+                "X-FIT membership activated.",
+            "membership": {
+                "id": membership.id,
+                "plan": membership.plan,
+                "amount": float(
+                    membership.amount
+                ),
+                "status": membership.status,
+                "started_at":
+                    membership.started_at,
+                "expires_at":
+                    membership.expires_at,
+            },
+        },
+        status=status.HTTP_200_OK
+    )
+
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def membership_status(request):
 
-    user = request.user
     now = timezone.now()
 
-    # ------------------------------------------------------
-    # 1. CHECK PAID MEMBERSHIP
-    # ------------------------------------------------------
-
-    paid_membership = (
+    membership = (
         Membership.objects
         .filter(
-            user=user,
+            user=request.user,
             status="paid",
         )
         .order_by("-expires_at")
         .first()
     )
 
-    if paid_membership:
+    if not membership:
 
-        if (
-            paid_membership.expires_at
-            and paid_membership.expires_at > now
-        ):
+        return Response(
+            {
+                "active": False,
+                "membership": None,
+            },
+            status=status.HTTP_200_OK
+        )
 
-            remaining_days = (
-                paid_membership.expires_at.date()
-                - now.date()
-            ).days
+    if (
+        not membership.expires_at
+        or membership.expires_at <= now
+    ):
 
-            return Response(
-                {
-                    "active": True,
-                    "type": "paid",
-                    "trial": False,
-                    "trial_expired": False,
-                    "remaining_days": max(
-                        remaining_days,
-                        0
-                    ),
-                    "membership": {
-                        "id": paid_membership.id,
-                        "plan": paid_membership.plan,
-                        "amount": float(
-                            paid_membership.amount
-                        ),
-                        "status": paid_membership.status,
-                        "started_at":
-                            paid_membership.started_at,
-                        "expires_at":
-                            paid_membership.expires_at,
-                    },
-                },
-                status=status.HTTP_200_OK,
-            )
+        if membership.status == "paid":
 
-        # Paid membership has expired.
-        if paid_membership.status == "paid":
+            membership.status = "expired"
 
-            paid_membership.status = "expired"
-
-            paid_membership.save(
+            membership.save(
                 update_fields=[
                     "status",
                     "updated_at",
                 ]
             )
 
-    # ------------------------------------------------------
-    # 2. FREE 30-DAY TRIAL
-    # ------------------------------------------------------
-
-    trial_start = user.date_joined
-    trial_end = (
-        trial_start
-        + timedelta(days=FREE_TRIAL_DAYS)
-    )
-
-    if now < trial_end:
-
-        remaining_days = (
-            trial_end.date()
-            - now.date()
-        ).days
-
         return Response(
             {
-                "active": True,
-                "type": "free_trial",
-                "trial": True,
-                "trial_expired": False,
-                "remaining_days": max(
-                    remaining_days,
-                    0
-                ),
+                "active": False,
                 "membership": {
-                    "plan": "free_trial",
-                    "name": "X-FIT Free Trial",
-                    "amount": 0,
-                    "status": "active",
-                    "started_at": trial_start,
-                    "expires_at": trial_end,
+                    "plan":
+                        membership.plan,
+                    "status":
+                        "expired",
+                    "expires_at":
+                        membership.expires_at,
                 },
             },
-            status=status.HTTP_200_OK,
+            status=status.HTTP_200_OK
         )
-
-    # ------------------------------------------------------
-    # 3. TRIAL EXPIRED
-    # ------------------------------------------------------
 
     return Response(
         {
-            "active": False,
-            "type": "trial_expired",
-            "trial": True,
-            "trial_expired": True,
-            "remaining_days": 0,
-            "membership": None,
-            "message":
-                "Your 30-day free trial has expired. "
-                "Please choose a membership plan and "
-                "complete the manual UPI payment.",
+            "active": True,
+            "membership": {
+                "id":
+                    membership.id,
+                "plan":
+                    membership.plan,
+                "amount":
+                    float(membership.amount),
+                "status":
+                    membership.status,
+                "started_at":
+                    membership.started_at,
+                "expires_at":
+                    membership.expires_at,
+            },
         },
-        status=status.HTTP_200_OK,
+        status=status.HTTP_200_OK
     )
 
-
-# ==========================================================
-# MEMBERSHIP HISTORY
-# ==========================================================
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
@@ -3338,26 +3553,22 @@ def membership_history(request):
 
         history.append(
             {
-                "id": membership.id,
-                "plan": membership.plan,
-                "amount": float(
-                    membership.amount
-                ),
-                "status": membership.status,
-
-                # Kept for database compatibility.
+                "id":
+                    membership.id,
+                "plan":
+                    membership.plan,
+                "amount":
+                    float(membership.amount),
+                "status":
+                    membership.status,
                 "razorpay_order_id":
                     membership.razorpay_order_id,
-
                 "razorpay_payment_id":
                     membership.razorpay_payment_id,
-
                 "started_at":
                     membership.started_at,
-
                 "expires_at":
                     membership.expires_at,
-
                 "created_at":
                     membership.created_at,
             }
@@ -3367,116 +3578,35 @@ def membership_history(request):
         {
             "history": history
         },
-        status=status.HTTP_200_OK,
+        status=status.HTTP_200_OK
     )
-
-
-# ==========================================================
-# SUBMIT MANUAL UPI PAYMENT
-# ==========================================================
-
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def submit_upi_payment(request):
 
     plan = request.data.get("plan")
 
-    # ------------------------------------------------------
-    # VALIDATE PLAN
-    # ------------------------------------------------------
-
     if not plan:
-
         return Response(
             {
-                "error":
-                    "Membership plan is required."
+                "error": "Membership plan is required."
             },
-            status=status.HTTP_400_BAD_REQUEST,
+            status=400
         )
 
-    # Allow frontend to send the displayed plan name
-    # as well as the actual plan key.
-    plan_aliases = {
-        "X-FIT Monthly": "monthly",
-        "Monthly": "monthly",
-
-        "X-FIT Half-Yearly": "quarterly",
-        "Half-Yearly": "quarterly",
-        "Half Yearly": "quarterly",
-        "Quarterly": "quarterly",
-
-        "X-FIT Yearly": "yearly",
-        "Yearly": "yearly",
-    }
-
-    plan = plan_aliases.get(
-        str(plan).strip(),
-        str(plan).strip().lower()
-    )
 
     if plan not in MEMBERSHIP_PLANS:
 
         return Response(
             {
-                "error":
-                    "Invalid membership plan.",
-                "available_plans":
-                    list(MEMBERSHIP_PLANS.keys()),
+                "error": "Invalid membership plan."
             },
-            status=status.HTTP_400_BAD_REQUEST,
+            status=400
         )
+
 
     plan_data = MEMBERSHIP_PLANS[plan]
 
-    # ------------------------------------------------------
-    # CHECK FOR EXISTING PENDING PAYMENT
-    # ------------------------------------------------------
-
-    existing_pending = (
-        Membership.objects
-        .filter(
-            user=request.user,
-            plan=plan,
-            status="created",
-        )
-        .order_by("-created_at")
-        .first()
-    )
-
-    if existing_pending:
-
-        return Response(
-            {
-                "success": True,
-                "message":
-                    "A payment submission for this "
-                    "plan is already awaiting verification.",
-
-                "membership_id":
-                    existing_pending.id,
-
-                "status":
-                    existing_pending.status,
-
-                "plan":
-                    existing_pending.plan,
-
-                "plan_name":
-                    plan_data["name"],
-
-                "amount":
-                    str(existing_pending.amount),
-
-                "days":
-                    plan_data["days"],
-            },
-            status=status.HTTP_200_OK,
-        )
-
-    # ------------------------------------------------------
-    # CREATE PENDING MEMBERSHIP
-    # ------------------------------------------------------
 
     membership = Membership.objects.create(
 
@@ -3486,16 +3616,17 @@ def submit_upi_payment(request):
 
         amount=plan_data["amount"],
 
-        status="created",
+        status="created"
+
     )
+
 
     return Response(
         {
             "success": True,
 
             "message":
-                "UPI payment submitted successfully. "
-                "Your payment is awaiting verification.",
+                "UPI payment submitted and awaiting verification.",
 
             "membership_id":
                 membership.id,
@@ -3506,16 +3637,11 @@ def submit_upi_payment(request):
             "plan":
                 membership.plan,
 
-            "plan_name":
-                plan_data["name"],
-
             "amount":
                 str(membership.amount),
 
-            "days":
-                plan_data["days"],
         },
-        status=status.HTTP_201_CREATED,
+        status=201
     )
 # =========================================================
 # X-FIT SHOP - CREATE ORDER
@@ -3719,9 +3845,25 @@ def create_shop_order(request):
             item.get("color", "")
         ).strip()
 
-        available_colors = product.colors or []
+        available_colors = [
+            str(value).strip()
+            for value in (product.colors or [])
+        ]
 
-        if color and color not in available_colors:
+        def normalize_color(value):
+            return "/".join(
+                part.strip()
+                for part in str(value).strip().split("/")
+            ).casefold()
+
+        requested_color = normalize_color(color)
+
+        available_color_map = {
+            normalize_color(value): value
+            for value in available_colors
+        }
+
+        if color and requested_color not in available_color_map:
 
             return Response(
                 {
@@ -3733,6 +3875,10 @@ def create_shop_order(request):
                 },
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        # Store the database's canonical color format.
+        if color:
+            color = available_color_map[requested_color]
 
         # -------------------------------------------------
         # SIZE VALIDATION
