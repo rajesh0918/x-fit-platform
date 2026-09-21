@@ -1054,16 +1054,12 @@ def toggle_workout_exercise(
 ):
 
     try:
-
         exercise = WorkoutExercise.objects.get(
             id=exercise_id,
-
-            workout_day__plan__user=
-                request.user,
+            workout_day__plan__user=request.user,
         )
 
     except WorkoutExercise.DoesNotExist:
-
         return Response(
             {
                 "error":
@@ -1072,46 +1068,116 @@ def toggle_workout_exercise(
             status=status.HTTP_404_NOT_FOUND
         )
 
-    exercise.completed = (
-        not exercise.completed
-    )
+    workout_day = exercise.workout_day
 
-    exercise.save()
-
-    workout_day = (
-        exercise.workout_day
-    )
-
-    day_exercises = (
-        WorkoutExercise.objects.filter(
-            workout_day=workout_day
+    training_days = list(
+        WorkoutDay.objects
+        .filter(
+            plan=workout_day.plan,
+            is_rest_day=False,
+        )
+        .order_by(
+            "week_number",
+            "day_number",
         )
     )
 
-    all_completed = (
-        day_exercises.exists()
-        and all(
-            item.completed
-            for item in day_exercises
-        )
+    current_index = next(
+        (
+            index
+            for index, item in enumerate(training_days)
+            if item.id == workout_day.id
+        ),
+        None,
     )
 
-    if all_completed:
+    if current_index is None:
+        return Response(
+            {
+                "error":
+                    "Workout day not found."
+            },
+            status=status.HTTP_404_NOT_FOUND
+        )
 
-        workout_day.completed = True
+    if current_index > 0:
+        previous_day = training_days[current_index - 1]
 
-        if workout_day.completed_at is None:
-
-            workout_day.completed_at = (
-                timezone.now()
+        if not previous_day.completed:
+            return Response(
+                {
+                    "error":
+                        "Complete the previous training day first."
+                },
+                status=status.HTTP_403_FORBIDDEN
             )
 
-    else:
+    # --------------------------------------------------
+    # EXPLICIT DAY SUBMISSION
+    # --------------------------------------------------
+    if request.data.get("complete_day") is True:
 
-        workout_day.completed = False
-        workout_day.completed_at = None
+        if workout_day.completed:
+            return Response(
+                {
+                    "workout_day_id":
+                        workout_day.id,
+                    "day_completed": True,
+                    "completed_at":
+                        (
+                            workout_day.completed_at.isoformat()
+                            if workout_day.completed_at
+                            else None
+                        ),
+                },
+                status=status.HTTP_200_OK
+            )
 
-    workout_day.save()
+        day_exercises = WorkoutExercise.objects.filter(
+            workout_day=workout_day
+        )
+
+        if not day_exercises.exists() or not all(
+            item.completed
+            for item in day_exercises
+        ):
+            return Response(
+                {
+                    "error":
+                        "Complete every exercise before submitting the day."
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        workout_day.completed = True
+        workout_day.completed_at = timezone.now()
+        workout_day.save()
+
+        return Response(
+            {
+                "workout_day_id":
+                    workout_day.id,
+                "day_completed": True,
+                "completed_at":
+                    workout_day.completed_at.isoformat(),
+            },
+            status=status.HTTP_200_OK
+        )
+
+    # --------------------------------------------------
+    # NORMAL EXERCISE TOGGLE
+    # --------------------------------------------------
+    if workout_day.completed:
+        return Response(
+            {
+                "error":
+                    "This workout day is already complete."
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    exercise.completed = not exercise.completed
+    exercise.save()
 
     return Response(
         {
@@ -1132,12 +1198,8 @@ def toggle_workout_exercise(
 
             "completed_at":
                 (
-                    workout_day
-                    .completed_at
-                    .isoformat()
-
+                    workout_day.completed_at.isoformat()
                     if workout_day.completed_at
-
                     else None
                 ),
         },

@@ -1,105 +1,114 @@
-import {
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-
-import {
-  useNavigate,
-} from "react-router-dom";
-
-import {
-  motion,
-  AnimatePresence,
-} from "framer-motion";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import apiFetch from "../services/api";
-import CinematicBackground from "../components/futuristic/CinematicBackground";
 
 
 function WorkoutPlan() {
-  const navigate =
-    useNavigate();
+  const navigate = useNavigate();
 
-  const [plan, setPlan] =
+  const [plan, setPlan] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const [updatingExercise, setUpdatingExercise] =
     useState(null);
 
-  const [loading, setLoading] =
-    useState(true);
+  const [streak, setStreak] = useState(0);
 
-  const [error, setError] =
-    useState("");
-
-  const [
-    updatingExercise,
-    setUpdatingExercise,
-  ] = useState(null);
-
-  const [
-    activeWeek,
-    setActiveWeek,
-  ] = useState(1);
+  const [confirmingDay, setConfirmingDay] =
+    useState(null);
 
 
   // ==================================================
-  // LOAD ACTIVE PLAN
+  // LOAD ACTIVE WORKOUT PLAN
   // ==================================================
 
-  const fetchPlan =
-    async () => {
+  const fetchPlan = async () => {
+    try {
+      setLoading(true);
+      setError("");
 
-      try {
-        setLoading(true);
-        setError("");
-
-        const response =
-          await apiFetch(
-            "/workouts/active/"
-          );
-
-        if (!response) {
-          return;
-        }
-
-        if (
-          response.status === 404
-        ) {
-          setPlan(null);
-          return;
-        }
-
-        const data =
-          await response.json();
-
-        if (response.ok) {
-          setPlan(data);
-          return;
-        }
-
-        setError(
-          data.error ||
-          data.detail ||
-          "Could not load workout plan."
+      const response =
+        await apiFetch(
+          "/workouts/active/"
         );
 
-      } catch (err) {
-        console.error(
-          "Workout plan error:",
-          err
-        );
-
-        setError(
-          "Could not load your workout plan."
-        );
-
-      } finally {
-        setLoading(false);
+      if (!response) {
+        return;
       }
-    };
+
+      if (
+        response.status === 404
+      ) {
+        setPlan(null);
+        return;
+      }
+
+      const data =
+        await response.json();
+
+      if (response.ok) {
+        setPlan(data);
+
+        return;
+      }
+
+      setError(
+        data.error ||
+        data.detail ||
+        "Could not load workout plan."
+      );
+
+    } catch (err) {
+      console.error(
+        "Workout plan error:",
+        err
+      );
+
+      setError(
+        "Could not load your workout plan."
+      );
+
+    } finally {
+      setLoading(false);
+    }
+  };
 
 
   useEffect(() => {
     fetchPlan();
+  }, []);
+
+
+  // ==================================================
+  // LOAD WORKOUT STREAK
+  // ==================================================
+
+  const fetchStreak = async () => {
+    try {
+      const response = await apiFetch(
+        "/workouts/stats/"
+      );
+
+      if (!response || !response.ok) {
+        return;
+      }
+
+      const data = await response.json();
+      setStreak(data.current_streak || 0);
+
+    } catch (err) {
+      console.error(
+        "Workout streak error:",
+        err
+      );
+    }
+  };
+
+
+  useEffect(() => {
+    fetchStreak();
   }, []);
 
 
@@ -150,10 +159,16 @@ function WorkoutPlan() {
         }
 
 
+        // ------------------------------------------
+        // UPDATE UI WITHOUT FULL PAGE RELOAD
+        // ------------------------------------------
+
         setPlan(
           (currentPlan) => {
 
-            if (!currentPlan) {
+            if (
+              !currentPlan
+            ) {
               return currentPlan;
             }
 
@@ -225,73 +240,178 @@ function WorkoutPlan() {
 
 
   // ==================================================
-  // PLAN STATS
+  // CONFIRM COMPLETED DAY
   // ==================================================
 
-  const stats =
-    useMemo(() => {
+  const confirmDay = async (day) => {
+    if (!day || day.completed || day.is_rest_day) {
+      return;
+    }
 
-      if (!plan?.days) {
-        return {
-          totalExercises: 0,
-          completedExercises: 0,
-          completedDays: 0,
-          trainingDays: 0,
-          percent: 0,
-        };
+    const exercises = day.exercises || [];
+    const allCompleted =
+      exercises.length > 0 &&
+      exercises.every(
+        (exercise) => exercise.completed
+      );
+
+    if (!allCompleted) {
+      setError(
+        "Complete every exercise before submitting the day."
+      );
+      return;
+    }
+
+    try {
+      setConfirmingDay(day.id);
+      setError("");
+
+      const firstExerciseId =
+        exercises[0]?.id;
+
+      if (!firstExerciseId) {
+        setError(
+          "No exercise was found for this day."
+        );
+        return;
       }
 
-      const trainingDays =
-        plan.days.filter(
-          (day) =>
-            !day.is_rest_day
+      const response = await apiFetch(
+        `/workouts/exercises/${firstExerciseId}/toggle/`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            complete_day: true,
+          }),
+        }
+      );
+
+      if (!response) {
+        return;
+      }
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setError(
+          data.error ||
+          data.detail ||
+          "Could not complete the workout day."
         );
+        return;
+      }
 
-      const exercises =
-        trainingDays.flatMap(
-          (day) =>
-            day.exercises || []
-        );
+      setPlan((currentPlan) => {
+        if (!currentPlan) {
+          return currentPlan;
+        }
 
-      const completedExercises =
-        exercises.filter(
-          (exercise) =>
-            exercise.completed
-        );
+        return {
+          ...currentPlan,
+          days: currentPlan.days.map((item) =>
+            item.id === data.workout_day_id
+              ? {
+                  ...item,
+                  completed: true,
+                  completed_at: data.completed_at,
+                }
+              : item
+          ),
+        };
+      });
 
-      const completedDays =
-        trainingDays.filter(
-          (day) =>
-            day.completed
-        );
+      await fetchStreak();
 
-      const percent =
-        exercises.length > 0
-          ? Math.round(
-              (
-                completedExercises.length /
-                exercises.length
-              ) * 100
-            )
-          : 0;
+    } catch (err) {
+      console.error(
+        "Day confirmation error:",
+        err
+      );
+      setError(
+        "Could not confirm the completed day."
+      );
 
+    } finally {
+      setConfirmingDay(null);
+    }
+  };
+
+
+  // ==================================================
+  // PLAN STATISTICS
+  // ==================================================
+
+  const stats = useMemo(() => {
+    if (!plan?.days) {
       return {
-        totalExercises:
-          exercises.length,
-
-        completedExercises:
-          completedExercises.length,
-
-        completedDays:
-          completedDays.length,
-
-        trainingDays:
-          trainingDays.length,
-
-        percent,
+        totalExercises: 0,
+        completedExercises: 0,
+        completedDays: 0,
+        trainingDays: 0,
+        percent: 0,
       };
+    }
 
-    }, [plan]);
+
+    const trainingDays =
+      plan.days.filter(
+        (day) =>
+          !day.is_rest_day
+      );
+
+
+    const exercises =
+      trainingDays.flatMap(
+        (day) =>
+          day.exercises || []
+      );
+
+
+    const completedExercises =
+      exercises.filter(
+        (exercise) =>
+          exercise.completed
+      );
+
+
+    const completedDays =
+      trainingDays.filter(
+        (day) =>
+          day.completed
+      );
+
+
+    const percent =
+      exercises.length > 0
+        ? Math.round(
+            (
+              completedExercises.length /
+              exercises.length
+            ) * 100
+          )
+        : 0;
+
+
+    return {
+      totalExercises:
+        exercises.length,
+
+      completedExercises:
+        completedExercises.length,
+
+      completedDays:
+        completedDays.length,
+
+      trainingDays:
+        trainingDays.length,
+
+      percent,
+    };
+
+  }, [plan]);
 
 
   // ==================================================
@@ -300,15 +420,13 @@ function WorkoutPlan() {
 
   if (loading) {
     return (
-      <div className="relative min-h-screen bg-[#050505] text-white flex items-center justify-center overflow-hidden">
+      <div className="min-h-screen bg-[#070707] text-white flex items-center justify-center">
 
-        <CinematicBackground />
-
-        <div className="relative z-20 text-center">
+        <div className="text-center">
 
           <div className="w-16 h-16 border-2 border-[#ccff00]/20 border-t-[#ccff00] rounded-full animate-spin mx-auto" />
 
-          <p className="text-[#ccff00] text-[10px] tracking-[0.28em] mt-6">
+          <p className="text-[#ccff00] text-sm tracking-[0.22em] mt-5">
             LOADING TRAINING PROTOCOL
           </p>
 
@@ -325,161 +443,119 @@ function WorkoutPlan() {
 
   if (!plan) {
     return (
-      <div className="relative min-h-screen bg-[#050505] text-white flex items-center justify-center px-6 overflow-hidden">
+      <div
+        className="min-h-screen bg-[#070707] text-white flex items-center justify-center px-6"
+        style={{
+          backgroundImage:
+            "linear-gradient(rgba(204,255,0,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(204,255,0,0.03) 1px, transparent 1px)",
 
-        <CinematicBackground />
+          backgroundSize:
+            "45px 45px",
+        }}
+      >
 
-        <motion.div
-          initial={{
-            opacity: 0,
-            scale: 0.96,
-          }}
-          animate={{
-            opacity: 1,
-            scale: 1,
-          }}
-          className="relative z-20 max-w-2xl w-full rounded-[30px] border border-[#ccff00]/20 bg-black/40 backdrop-blur-2xl p-9 text-center"
-        >
+        <div className="max-w-xl w-full bg-[#111111] border border-[#ccff00]/20 rounded-2xl p-8 text-center">
 
-          <p className="text-[#ccff00] text-[10px] tracking-[0.28em]">
+          <p className="text-[#ccff00] text-xs tracking-[0.25em]">
             X-FIT TRAINING ENGINE
           </p>
 
-          <h1 className="text-4xl md:text-5xl font-black mt-5">
-            NO ACTIVE PROTOCOL
+          <h1 className="text-3xl md:text-4xl font-black mt-4">
+            No Workout Plan Yet
           </h1>
 
-          <p className="text-[#8f968a] mt-5 leading-relaxed">
-            Complete your athlete assessment and X-Fit
-            will generate your personalized four-week training
-            architecture.
+          <p className="text-[#8d9384] mt-4 leading-relaxed">
+            Complete your athlete assessment and X-Fit will
+            generate your personalized four-week training protocol.
           </p>
 
           <button
             onClick={() =>
-              navigate(
-                "/assessment"
-              )
+              navigate("/assessment")
             }
-            className="mt-8 bg-[#ccff00] text-black font-black px-8 py-4 rounded-xl hover:bg-[#b8e600] transition"
+            className="mt-7 bg-[#ccff00] text-black font-black px-8 py-4 rounded-lg hover:bg-[#b8e600] transition"
           >
             START ASSESSMENT →
           </button>
 
-        </motion.div>
+        </div>
 
       </div>
     );
   }
 
 
-  // ==================================================
-  // WEEK DATA
-  // ==================================================
-
-  const weeks = [1, 2, 3, 4];
-
-  const activeWeekDays =
-    plan.days.filter(
-      (day) =>
-        day.week_number ===
-        activeWeek
-    );
-
-  const activeWeekTheme =
-    activeWeekDays.length > 0
-      ? activeWeekDays[0].theme
-      : "";
-
-  const activeWeekTrainingDays =
-    activeWeekDays.filter(
-      (day) =>
-        !day.is_rest_day
-    );
-
-  const completedWeekDays =
-    activeWeekTrainingDays.filter(
-      (day) =>
-        day.completed
-    ).length;
-
-  const activeWeekPercent =
-    activeWeekTrainingDays.length > 0
-      ? Math.round(
-          (
-            completedWeekDays /
-            activeWeekTrainingDays.length
-          ) * 100
-        )
-      : 0;
+  const weeks =
+    [1, 2, 3, 4];
 
 
   return (
-    <div className="relative min-h-screen bg-[#050505] text-white overflow-x-hidden">
+    <div
+      className="min-h-screen bg-[#070707] text-white"
+      style={{
+        backgroundImage:
+          "linear-gradient(rgba(204,255,0,0.025) 1px, transparent 1px), linear-gradient(90deg, rgba(204,255,0,0.025) 1px, transparent 1px)",
 
-      <CinematicBackground />
+        backgroundSize:
+          "45px 45px",
+      }}
+    >
+
+      {/* BACKGROUND GLOW */}
+
+      <div className="fixed top-[-250px] right-[-200px] w-[650px] h-[650px] bg-[#ccff00]/5 rounded-full blur-[150px] pointer-events-none" />
 
 
       {/* ==================================================
           NAVBAR
       ================================================== */}
 
-      <nav className="fixed top-0 left-0 right-0 z-50 h-20 bg-black/35 backdrop-blur-2xl border-b border-white/5">
+      <nav className="sticky top-0 z-50 h-20 bg-[#070707]/90 backdrop-blur-xl border-b border-[#444933]/40">
 
-        <div className="max-w-[1500px] mx-auto h-full px-5 md:px-10 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto h-full px-6 flex items-center justify-between">
 
           <button
             onClick={() =>
-              navigate(
-                "/dashboard"
-              )
+              navigate("/dashboard")
             }
-            className="text-[#ccff00] text-4xl font-black tracking-[-0.06em]"
+            className="text-[#ccff00] text-4xl font-black tracking-tighter"
           >
             X-FIT
           </button>
 
 
-          <div className="hidden lg:flex items-center gap-8 h-full">
+          <div className="hidden md:flex items-center gap-7">
 
             <NavButton
               text="Today"
               onClick={() =>
-                navigate(
-                  "/dashboard"
-                )
+                navigate("/dashboard")
               }
             />
 
             <NavButton
-              text="Training"
+              text="Workouts"
               active
             />
 
             <NavButton
               text="MotionCheck"
               onClick={() =>
-                navigate(
-                  "/motioncheck"
-                )
+                navigate("/motioncheck")
               }
             />
 
             <NavButton
               text="Nutrition"
               onClick={() =>
-                navigate(
-                  "/diet-plan"
-                )
+                navigate("/diet-plan")
               }
             />
 
             <NavButton
               text="Progress DNA"
               onClick={() =>
-                navigate(
-                  "/progress-dna"
-                )
+                navigate("/progress-dna")
               }
             />
 
@@ -488,11 +564,9 @@ function WorkoutPlan() {
 
           <button
             onClick={() =>
-              navigate(
-                "/profile"
-              )
+              navigate("/profile")
             }
-            className="w-10 h-10 border border-white/10 bg-black/30 rounded-full text-[#ccff00] hover:bg-[#ccff00] hover:text-black transition"
+            className="w-10 h-10 border border-[#444933] rounded-full text-[#ccff00] hover:bg-[#ccff00] hover:text-black transition"
           >
             ◉
           </button>
@@ -503,79 +577,42 @@ function WorkoutPlan() {
 
 
       {/* ==================================================
-          MAIN
+          PAGE
       ================================================== */}
 
-      <main className="relative z-20 max-w-[1500px] mx-auto px-5 md:px-10 pt-[115px] pb-24">
+      <main className="relative z-10 max-w-7xl mx-auto px-6 py-12">
 
 
         {/* HEADER */}
 
-        <motion.header
-          initial={{
-            opacity: 0,
-            y: 20,
-          }}
-          animate={{
-            opacity: 1,
-            y: 0,
-          }}
-          className="mb-10"
-        >
+        <header className="mb-10">
 
-          <div className="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-6">
+          <p className="text-[#ccff00] uppercase tracking-[0.25em] text-sm mb-2">
+            X-Fit Training Architecture
+          </p>
 
+          <h1 className="text-4xl md:text-6xl font-black mb-4">
+            Your 4-Week Protocol
+          </h1>
+
+          <p className="text-[#8d9384] text-lg">
+            Complete each exercise to advance your training
+            consistency and Progress DNA.
+          </p>
+
+          <div className="mt-5 inline-flex items-center gap-3 border border-[#ccff00]/25 bg-[#111111] rounded-xl px-5 py-3">
+            <span className="text-xl">🔥</span>
             <div>
-
-              <p className="text-[#ccff00] text-[10px] tracking-[0.28em]">
-                X-FIT TRAINING ARCHITECTURE
+              <p className="text-[#ccff00] font-black text-lg">
+                {streak} Day Streak
               </p>
-
-              <h1 className="text-4xl md:text-6xl xl:text-7xl font-black tracking-[-0.05em] mt-4">
-
-                FOUR-WEEK
-
-                <br />
-
-                <span className="text-[#ccff00]">
-                  PROTOCOL.
-                </span>
-
-              </h1>
-
-              <p className="text-[#91988c] text-lg mt-5 max-w-2xl leading-relaxed">
-                Execute each training session to increase
-                consistency, unlock progression and evolve your
-                Progress DNA.
+              <p className="text-[#707766] text-[10px] uppercase tracking-[0.18em]">
+                Training consistency
               </p>
-
             </div>
-
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-
-              <HeaderStat
-                label="LEVEL"
-                value={plan.level}
-                highlight
-              />
-
-              <HeaderStat
-                label="FREQUENCY"
-                value={`${plan.workout_days_per_week}/WK`}
-              />
-
-              <HeaderStat
-                label="COMPLETE"
-                value={`${stats.percent}%`}
-                highlight
-              />
-
-            </div>
-
           </div>
 
-        </motion.header>
+        </header>
 
 
         {/* ERROR */}
@@ -588,264 +625,80 @@ function WorkoutPlan() {
 
 
         {/* ==================================================
-            PROTOCOL OVERVIEW
+            PLAN OVERVIEW
         ================================================== */}
 
-        <section className="grid xl:grid-cols-12 gap-5 mb-8">
+        <section className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
 
+          <OverviewCard
+            label="X-FIT LEVEL"
+            value={plan.level}
+            highlight
+          />
 
-          {/* LEFT PROGRESS CORE */}
+          <OverviewCard
+            label="FITNESS GOAL"
+            value={
+              formatText(
+                plan.fitness_goal
+              )
+            }
+          />
 
-          <div className="xl:col-span-5 relative overflow-hidden rounded-[30px] border border-[#ccff00]/20 bg-black/40 backdrop-blur-xl p-8">
+          <OverviewCard
+            label="TRAINING DAYS"
+            value={`${plan.workout_days_per_week}/week`}
+          />
 
-            <div className="absolute right-[-100px] top-[-100px] w-[320px] h-[320px] rounded-full bg-[#ccff00]/10 blur-[120px]" />
+          <OverviewCard
+            label="EXERCISES"
+            value={`${stats.completedExercises}/${stats.totalExercises}`}
+          />
 
-
-            <div className="relative z-10">
-
-              <p className="text-[#62695f] text-[9px] tracking-[0.24em]">
-                PROTOCOL COMPLETION
-              </p>
-
-
-              <div className="relative w-[240px] h-[240px] mx-auto mt-8">
-
-                <div className="absolute inset-0 rounded-full border-[12px] border-white/5" />
-
-                <motion.div
-                  animate={{
-                    rotate: 360,
-                  }}
-                  transition={{
-                    duration: 30,
-                    repeat: Infinity,
-                    ease: "linear",
-                  }}
-                  className="absolute inset-[-8px] rounded-full border border-dashed border-[#ccff00]/25"
-                />
-
-                <motion.div
-                  animate={{
-                    rotate: -360,
-                  }}
-                  transition={{
-                    duration: 20,
-                    repeat: Infinity,
-                    ease: "linear",
-                  }}
-                  className="absolute inset-[22px] rounded-full border border-[#ccff00]/15"
-                />
-
-
-                <div className="absolute inset-0 flex flex-col items-center justify-center">
-
-                  <p className="text-7xl font-black text-[#ccff00]">
-                    {stats.percent}
-                  </p>
-
-                  <p className="text-[#646b61] text-[9px] tracking-[0.2em] mt-1">
-                    % COMPLETE
-                  </p>
-
-                </div>
-
-              </div>
-
-
-              <div className="grid grid-cols-2 gap-3 mt-8">
-
-                <ProtocolMetric
-                  label="EXERCISES"
-                  value={`${stats.completedExercises}/${stats.totalExercises}`}
-                />
-
-                <ProtocolMetric
-                  label="TRAINING DAYS"
-                  value={`${stats.completedDays}/${stats.trainingDays}`}
-                />
-
-              </div>
-
-            </div>
-
-          </div>
-
-
-          {/* RIGHT OVERVIEW */}
-
-          <div className="xl:col-span-7 grid gap-5">
-
-            <div className="grid sm:grid-cols-2 gap-5">
-
-              <OverviewCard
-                label="ATHLETE LEVEL"
-                value={plan.level}
-                highlight
-              />
-
-              <OverviewCard
-                label="FITNESS GOAL"
-                value={
-                  formatText(
-                    plan.fitness_goal
-                  )
-                }
-              />
-
-            </div>
-
-
-            <div className="relative overflow-hidden rounded-[28px] border border-white/10 bg-black/35 backdrop-blur-xl p-7">
-
-              <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-5">
-
-                <div>
-
-                  <p className="text-[#62695f] text-[9px] tracking-[0.24em]">
-                    ACTIVE WEEK
-                  </p>
-
-                  <h2 className="text-3xl font-black mt-3">
-                    WEEK {activeWeek}
-                  </h2>
-
-                  <p className="text-[#ccff00] text-lg font-bold mt-2">
-                    {activeWeekTheme}
-                  </p>
-
-                </div>
-
-
-                <div className="md:text-right">
-
-                  <p className="text-5xl font-black text-[#ccff00]">
-                    {activeWeekPercent}%
-                  </p>
-
-                  <p className="text-[#646b61] text-[9px] tracking-[0.18em] mt-1">
-                    WEEK COMPLETION
-                  </p>
-
-                </div>
-
-              </div>
-
-
-              <div className="h-2 bg-white/5 rounded-full overflow-hidden mt-7">
-
-                <motion.div
-                  animate={{
-                    width:
-                      `${activeWeekPercent}%`,
-                  }}
-                  className="h-full bg-[#ccff00] rounded-full shadow-[0_0_14px_rgba(204,255,0,0.5)]"
-                />
-
-              </div>
-
-            </div>
-
-          </div>
+          <OverviewCard
+            label="PROGRAM"
+            value={`${stats.percent}%`}
+            highlight
+          />
 
         </section>
 
 
-        {/* ==================================================
-            WEEK NAV
-        ================================================== */}
+        {/* PROGRAM PROGRESS */}
 
-        <section className="mb-8">
+        <section className="bg-[#111111] border border-[#444933]/40 rounded-2xl p-6 mb-10">
 
-          <div className="flex items-end justify-between gap-4 mb-5">
+          <div className="flex justify-between gap-4 mb-3">
 
             <div>
 
-              <p className="text-[#ccff00] text-[10px] tracking-[0.24em]">
-                TRAINING BLOCKS
+              <p className="text-[#707766] text-xs tracking-[0.2em]">
+                PROGRAM COMPLETION
               </p>
 
-              <h2 className="text-3xl font-black mt-2">
-                Select Protocol Week
-              </h2>
+              <p className="font-bold text-white mt-1">
+                {stats.completedDays}/{stats.trainingDays} training days complete
+              </p>
 
             </div>
+
+
+            <p className="text-[#ccff00] text-2xl font-black">
+              {stats.percent}%
+            </p>
 
           </div>
 
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="h-2 bg-[#080908] rounded-full overflow-hidden">
 
-            {weeks.map(
-              (weekNumber) => {
-
-                const weekDays =
-                  plan.days.filter(
-                    (day) =>
-                      day.week_number ===
-                      weekNumber
-                  );
-
-                const trainingDays =
-                  weekDays.filter(
-                    (day) =>
-                      !day.is_rest_day
-                  );
-
-                const completedDays =
-                  trainingDays.filter(
-                    (day) =>
-                      day.completed
-                  ).length;
-
-                const selected =
-                  activeWeek ===
-                  weekNumber;
-
-
-                return (
-                  <motion.button
-                    whileHover={{
-                      y: -3,
-                    }}
-                    key={weekNumber}
-                    onClick={() =>
-                      setActiveWeek(
-                        weekNumber
-                      )
-                    }
-                    className={`relative overflow-hidden rounded-2xl border p-5 text-left transition ${
-                      selected
-                        ? "bg-[#ccff00]/10 border-[#ccff00]/40"
-                        : "bg-black/30 border-white/10 hover:border-[#ccff00]/25"
-                    }`}
-                  >
-
-                    <p className="text-[#666d63] text-[9px] tracking-[0.2em]">
-                      WEEK
-                    </p>
-
-                    <p
-                      className={`text-3xl font-black mt-2 ${
-                        selected
-                          ? "text-[#ccff00]"
-                          : "text-white"
-                      }`}
-                    >
-                      0{weekNumber}
-                    </p>
-
-                    <p className="text-[#8e9589] text-sm mt-2">
-                      {completedDays}/{trainingDays.length} sessions
-                    </p>
-
-                    {selected && (
-                      <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#ccff00]" />
-                    )}
-
-                  </motion.button>
-                );
-              }
-            )}
+            <div
+              className="h-full bg-[#ccff00] rounded-full transition-all duration-500 shadow-[0_0_12px_rgba(204,255,0,0.6)]"
+              style={{
+                width:
+                  `${stats.percent}%`,
+              }}
+            />
 
           </div>
 
@@ -853,81 +706,112 @@ function WorkoutPlan() {
 
 
         {/* ==================================================
-            ACTIVE WEEK
+            WEEKS
         ================================================== */}
 
-        <AnimatePresence
-          mode="wait"
-        >
+        <div className="space-y-14">
 
-          <motion.section
-            key={activeWeek}
-            initial={{
-              opacity: 0,
-              y: 15,
-            }}
-            animate={{
-              opacity: 1,
-              y: 0,
-            }}
-            exit={{
-              opacity: 0,
-              y: -10,
-            }}
-            transition={{
-              duration: 0.3,
-            }}
-          >
+          {weeks.map(
+            (weekNumber) => {
 
-            <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6">
-
-              <div>
-
-                <p className="text-[#ccff00] text-[10px] tracking-[0.24em]">
-                  WEEK {activeWeek}
-                </p>
-
-                <h2 className="text-3xl md:text-4xl font-black mt-2">
-                  {activeWeekTheme}
-                </h2>
-
-              </div>
+              const weekDays =
+                plan.days.filter(
+                  (day) =>
+                    day.week_number ===
+                    weekNumber
+                );
 
 
-              <p className="text-[#858c80] text-sm">
-                {completedWeekDays}/{activeWeekTrainingDays.length} sessions complete
-              </p>
+              const weekTheme =
+                weekDays.length > 0
+                  ? weekDays[0].theme
+                  : "";
 
-            </div>
+
+              const weekTrainingDays =
+                weekDays.filter(
+                  (day) =>
+                    !day.is_rest_day
+                );
 
 
-            <div className="grid xl:grid-cols-2 gap-5">
+              const completedWeekDays =
+                weekTrainingDays.filter(
+                  (day) =>
+                    day.completed
+                ).length;
 
-              {activeWeekDays.map(
-                (day) => (
 
-                  <WorkoutDayCard
-                    key={day.id}
-                    day={day}
-                    updatingExercise={
-                      updatingExercise
-                    }
-                    toggleExercise={
-                      toggleExercise
-                    }
-                    navigate={
-                      navigate
-                    }
-                  />
+              return (
+                <section
+                  key={
+                    weekNumber
+                  }
+                >
 
-                )
-              )}
+                  {/* WEEK HEADER */}
 
-            </div>
+                  <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6">
 
-          </motion.section>
+                    <div>
 
-        </AnimatePresence>
+                      <p className="text-[#ccff00] text-xs uppercase tracking-[0.25em]">
+                        Week {weekNumber}
+                      </p>
+
+                      <h2 className="text-3xl font-black mt-2">
+                        {weekTheme}
+                      </h2>
+
+                    </div>
+
+
+                    <p className="text-[#8d9384] text-sm">
+                      {completedWeekDays}/{weekTrainingDays.length} sessions complete
+                    </p>
+
+                  </div>
+
+
+                  {/* DAYS */}
+
+                  <div className="grid xl:grid-cols-2 gap-5">
+
+                    {weekDays.map(
+                      (day) => (
+
+                        <WorkoutDayCard
+                          key={day.id}
+                          day={day}
+                          allDays={plan.days}
+                          updatingExercise={
+                            updatingExercise
+                          }
+                          toggleExercise={
+                            toggleExercise
+                          }
+                          confirmDay={
+                            confirmDay
+                          }
+                          confirmingDay={
+                            confirmingDay
+                          }
+                          navigate={
+                            navigate
+                          }
+                        />
+
+                      )
+                    )}
+
+                  </div>
+
+                </section>
+              );
+            }
+          )}
+
+        </div>
 
 
         {/* ==================================================
@@ -938,11 +822,9 @@ function WorkoutPlan() {
 
           <button
             onClick={() =>
-              navigate(
-                "/dashboard"
-              )
+              navigate("/dashboard")
             }
-            className="border border-white/10 bg-black/30 text-white font-bold py-4 rounded-xl hover:border-[#ccff00]/40 transition"
+            className="border border-[#444933] text-white font-bold py-4 rounded-lg hover:border-[#ccff00] transition"
           >
             DASHBOARD
           </button>
@@ -950,11 +832,9 @@ function WorkoutPlan() {
 
           <button
             onClick={() =>
-              navigate(
-                "/motioncheck"
-              )
+              navigate("/motioncheck")
             }
-            className="border border-[#ccff00]/40 text-[#ccff00] font-bold py-4 rounded-xl hover:bg-[#ccff00]/10 transition"
+            className="border border-[#ccff00] text-[#ccff00] font-bold py-4 rounded-lg hover:bg-[#ccff00]/10 transition"
           >
             MOTIONCHECK
           </button>
@@ -962,11 +842,9 @@ function WorkoutPlan() {
 
           <button
             onClick={() =>
-              navigate(
-                "/progress-dna"
-              )
+              navigate("/progress-dna")
             }
-            className="bg-[#ccff00] text-black font-black py-4 rounded-xl hover:bg-[#b8e600] transition"
+            className="bg-[#ccff00] text-black font-black py-4 rounded-lg hover:bg-[#b8e600] transition"
           >
             PROGRESS DNA
           </button>
@@ -986,10 +864,34 @@ function WorkoutPlan() {
 
 function WorkoutDayCard({
   day,
+  allDays,
   updatingExercise,
   toggleExercise,
+  confirmDay,
+  confirmingDay,
   navigate,
 }) {
+
+  const trainingDays =
+    (allDays || []).filter(
+      (item) => !item.is_rest_day
+    );
+
+  const currentIndex =
+    trainingDays.findIndex(
+      (item) => item.id === day.id
+    );
+
+  const previousTrainingDay =
+    currentIndex > 0
+      ? trainingDays[currentIndex - 1]
+      : null;
+
+  const unlocked =
+    day.is_rest_day ||
+    day.completed ||
+    !previousTrainingDay ||
+    previousTrainingDay.completed;
 
   const completedExercises =
     day.exercises?.filter(
@@ -997,8 +899,10 @@ function WorkoutDayCard({
         exercise.completed
     ).length || 0;
 
+
   const totalExercises =
     day.exercises?.length || 0;
+
 
   const dayPercent =
     totalExercises > 0
@@ -1012,56 +916,31 @@ function WorkoutDayCard({
 
 
   return (
-    <motion.article
-      whileHover={{
-        y: day.is_rest_day
-          ? 0
-          : -2,
-      }}
-      className={`relative overflow-hidden rounded-[26px] border p-6 backdrop-blur-xl transition ${
+    <div
+      className={`rounded-2xl p-6 border transition ${
         day.completed
-          ? "bg-[#00ff95]/5 border-[#00ff95]/20"
+          ? "bg-[#0d1511] border-[#00ff95]/25"
           : day.is_rest_day
-          ? "bg-[#00d1ff]/5 border-[#00d1ff]/15"
-          : "bg-black/35 border-white/10"
+          ? "bg-[#0d1010] border-[#00d1ff]/20"
+          : !unlocked
+          ? "bg-[#0b0b0b] border-[#2b2d28]/50 opacity-75"
+          : "bg-[#111111] border-[#444933]/40"
       }`}
     >
 
-      <div className="flex justify-between items-start gap-4 mb-6">
+      {/* HEADER */}
 
-        <div className="flex gap-4">
+      <div className="flex justify-between items-start gap-4 mb-5">
 
-          <div
-            className={`w-12 h-12 rounded-xl flex items-center justify-center font-black border ${
-              day.completed
-                ? "bg-[#00ff95] text-black border-[#00ff95]"
-                : day.is_rest_day
-                ? "bg-[#00d1ff]/10 text-[#00d1ff] border-[#00d1ff]/20"
-                : "bg-[#ccff00]/5 text-[#ccff00] border-[#ccff00]/20"
-            }`}
-          >
-            {day.completed
-              ? "✓"
-              : String(
-                  day.day_number
-                ).padStart(
-                  2,
-                  "0"
-                )}
-          </div>
+        <div>
 
+          <p className="text-[#707766] text-xs tracking-[0.18em]">
+            DAY {day.day_number}
+          </p>
 
-          <div>
-
-            <p className="text-[#62695f] text-[9px] tracking-[0.2em]">
-              DAY {day.day_number}
-            </p>
-
-            <h3 className="text-2xl font-black mt-1">
-              {day.title}
-            </h3>
-
-          </div>
+          <h3 className="text-xl md:text-2xl font-black mt-1">
+            {day.title}
+          </h3>
 
         </div>
 
@@ -1080,6 +959,13 @@ function WorkoutDayCard({
             type="recovery"
           />
 
+        ) : !unlocked ? (
+
+          <StatusBadge
+            text="LOCKED"
+            type="locked"
+          />
+
         ) : (
 
           <StatusBadge
@@ -1095,15 +981,15 @@ function WorkoutDayCard({
 
       {day.is_rest_day ? (
 
-        <div className="rounded-xl border border-[#00d1ff]/10 bg-black/25 p-5">
+        <div className="bg-[#080908] border border-[#00d1ff]/10 rounded-xl p-5">
 
           <p className="text-[#00d1ff] font-bold">
             Recovery Protocol
           </p>
 
-          <p className="text-[#848b80] text-sm mt-2 leading-relaxed">
-            Prioritize sleep, hydration, mobility and
-            recovery before the next training block.
+          <p className="text-[#8d9384] text-sm mt-2 leading-relaxed">
+            Prioritize sleep, hydration, mobility and recovery
+            before your next training session.
           </p>
 
         </div>
@@ -1112,35 +998,46 @@ function WorkoutDayCard({
 
         <>
 
-          {/* SESSION PROGRESS */}
+          {!unlocked && (
+            <div className="mb-5 rounded-xl border border-[#444933]/40 bg-[#080908] p-4">
+              <p className="text-[#ccff00] font-bold text-sm">
+                🔒 DAY LOCKED
+              </p>
+              <p className="text-[#707766] text-xs mt-1">
+                Complete the previous training day to unlock this session.
+              </p>
+            </div>
+          )}
 
-          <div className="mb-6">
+          {/* DAY PROGRESS */}
 
-            <div className="flex justify-between mb-2">
+          <div className="mb-5">
 
-              <span className="text-[#62695f] text-[9px] tracking-[0.2em]">
+            <div className="flex justify-between mb-2 text-xs">
+
+              <span className="text-[#707766]">
                 SESSION PROGRESS
               </span>
 
-              <span className="text-[#ccff00] text-xs font-bold">
+              <span className="text-[#ccff00]">
                 {completedExercises}/{totalExercises}
               </span>
 
             </div>
 
 
-            <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+            <div className="h-1.5 bg-[#080908] rounded-full overflow-hidden">
 
-              <motion.div
-                animate={{
-                  width:
-                    `${dayPercent}%`,
-                }}
-                className={`h-full rounded-full ${
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${
                   day.completed
                     ? "bg-[#00ff95]"
                     : "bg-[#ccff00]"
                 }`}
+                style={{
+                  width:
+                    `${dayPercent}%`,
+                }}
               />
 
             </div>
@@ -1162,63 +1059,76 @@ function WorkoutDayCard({
 
                 return (
                   <div
-                    key={exercise.id}
-                    className={`rounded-xl border p-4 transition ${
+                    key={
+                      exercise.id
+                    }
+                    className={`rounded-xl p-4 border ${
                       exercise.completed
-                        ? "bg-[#00ff95]/5 border-[#00ff95]/15"
-                        : "bg-black/30 border-white/5 hover:border-[#ccff00]/20"
+                        ? "bg-[#0b1410] border-[#00ff95]/20"
+                        : "bg-[#080908] border-[#444933]/30"
                     }`}
                   >
 
                     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
 
-                      <div className="flex items-center gap-3">
 
-                        <button
-                          type="button"
-                          disabled={
-                            updating
-                          }
-                          onClick={() =>
-                            toggleExercise(
-                              exercise.id
-                            )
-                          }
-                          className={`w-9 h-9 rounded-lg border flex-shrink-0 flex items-center justify-center font-black transition ${
-                            exercise.completed
-                              ? "bg-[#00ff95] text-black border-[#00ff95]"
-                              : "border-white/10 text-[#ccff00] hover:border-[#ccff00]/50"
-                          } disabled:opacity-50`}
-                        >
-                          {updating
-                            ? "…"
-                            : exercise.completed
-                            ? "✓"
-                            : ""}
-                        </button>
+                      {/* EXERCISE INFO */}
 
+                      <div>
 
-                        <div>
+                        <div className="flex items-center gap-3">
 
-                          <h4
-                            className={`font-bold text-lg ${
+                          <button
+                            type="button"
+                            disabled={
+                              updating ||
+                              !unlocked ||
+                              day.completed
+                            }
+                            onClick={() =>
+                              toggleExercise(
+                                exercise.id
+                              )
+                            }
+                            className={`w-8 h-8 flex-shrink-0 rounded-lg border flex items-center justify-center font-black transition ${
                               exercise.completed
-                                ? "text-[#00ff95]"
-                                : "text-white"
-                            }`}
+                                ? "bg-[#00ff95] text-black border-[#00ff95]"
+                                : "border-[#444933] text-[#ccff00] hover:border-[#ccff00]"
+                            } disabled:opacity-50 disabled:cursor-not-allowed`}
                           >
-                            {exercise.name}
-                          </h4>
+                            {updating
+                              ? "…"
+                              : exercise.completed
+                              ? "✓"
+                              : ""}
+                          </button>
 
-                          <p className="text-[#62695f] text-sm mt-1">
-                            {exercise.equipment ||
-                              "No equipment"}
-                          </p>
+
+                          <div>
+
+                            <h4
+                              className={`font-bold text-lg ${
+                                exercise.completed
+                                  ? "text-[#00ff95]"
+                                  : "text-white"
+                              }`}
+                            >
+                              {exercise.name}
+                            </h4>
+
+                            <p className="text-[#707766] text-sm mt-1">
+                              {exercise.equipment ||
+                                "No equipment"}
+                            </p>
+
+                          </div>
 
                         </div>
 
                       </div>
 
+
+                      {/* EXERCISE STATS */}
 
                       <div className="flex items-center flex-wrap gap-2">
 
@@ -1247,7 +1157,7 @@ function WorkoutDayCard({
                                 "/motioncheck"
                               )
                             }
-                            className="px-3 py-2 rounded-lg border border-[#ccff00]/30 bg-[#ccff00]/5 text-[#ccff00] text-[9px] font-bold tracking-[0.14em] hover:bg-[#ccff00]/10 transition"
+                            className="px-3 py-2 rounded-lg border border-[#ccff00]/40 text-[#ccff00] text-[10px] font-bold tracking-wider hover:bg-[#ccff00]/10 transition"
                           >
                             MOTIONCHECK
                           </button>
@@ -1265,16 +1175,53 @@ function WorkoutDayCard({
 
           </div>
 
+          {!day.is_rest_day && (
+            <div className="mt-5 pt-5 border-t border-[#444933]/30">
+              <button
+                type="button"
+                disabled={
+                  !unlocked ||
+                  day.completed ||
+                  totalExercises === 0 ||
+                  completedExercises !== totalExercises ||
+                  confirmingDay === day.id
+                }
+                onClick={() =>
+                  confirmDay(day)
+                }
+                className={`w-full py-3 rounded-lg font-black tracking-wide transition ${
+                  day.completed
+                    ? "bg-[#00ff95]/10 text-[#00ff95] border border-[#00ff95]/30"
+                    : !unlocked
+                    ? "bg-[#141414] text-[#555a50] border border-[#2b2d28]"
+                    : completedExercises === totalExercises
+                    ? "bg-[#ccff00] text-black hover:bg-[#b8e600]"
+                    : "bg-[#141414] text-[#707766] border border-[#444933]/40 cursor-not-allowed"
+                }`}
+              >
+                {day.completed
+                  ? "✓ DAY COMPLETE"
+                  : !unlocked
+                  ? "🔒 COMPLETE PREVIOUS DAY FIRST"
+                  : completedExercises === totalExercises
+                  ? confirmingDay === day.id
+                    ? "CONFIRMING..."
+                    : "COMPLETE DAY → UNLOCK NEXT"
+                  : `COMPLETE ALL EXERCISES (${completedExercises}/${totalExercises})`}
+              </button>
+            </div>
+          )}
+
         </>
       )}
 
-    </motion.article>
+    </div>
   );
 }
 
 
 /* ==================================================
-   NAV
+   NAV BUTTON
 ================================================== */
 
 function NavButton({
@@ -1287,10 +1234,10 @@ function NavButton({
       onClick={
         onClick
       }
-      className={`h-full flex items-center text-sm transition ${
+      className={`transition ${
         active
-          ? "text-white font-bold border-b-2 border-[#ccff00]"
-          : "text-[#92998c] hover:text-white"
+          ? "text-white font-bold border-b-2 border-[#ccff00] pb-1"
+          : "text-[#aeb39d] hover:text-white"
       }`}
     >
       {text}
@@ -1300,38 +1247,7 @@ function NavButton({
 
 
 /* ==================================================
-   HEADER STAT
-================================================== */
-
-function HeaderStat({
-  label,
-  value,
-  highlight = false,
-}) {
-  return (
-    <div className="rounded-xl border border-white/10 bg-black/30 px-5 py-3">
-
-      <p className="text-[#5f665c] text-[8px] tracking-[0.18em]">
-        {label}
-      </p>
-
-      <p
-        className={`font-black mt-2 ${
-          highlight
-            ? "text-[#ccff00]"
-            : "text-white"
-        }`}
-      >
-        {value}
-      </p>
-
-    </div>
-  );
-}
-
-
-/* ==================================================
-   OVERVIEW
+   OVERVIEW CARD
 ================================================== */
 
 function OverviewCard({
@@ -1340,43 +1256,19 @@ function OverviewCard({
   highlight = false,
 }) {
   return (
-    <div className="rounded-[24px] border border-white/10 bg-black/35 backdrop-blur-xl p-6">
+    <div className="bg-[#111111] border border-[#444933]/40 rounded-xl p-5">
 
-      <p className="text-[#62695f] text-[9px] tracking-[0.2em]">
+      <p className="text-[#707766] text-[10px] tracking-[0.18em]">
         {label}
       </p>
 
       <p
-        className={`font-black mt-4 capitalize ${
+        className={`font-black mt-3 capitalize ${
           highlight
-            ? "text-[#ccff00] text-3xl"
-            : "text-white text-2xl"
+            ? "text-[#ccff00] text-2xl"
+            : "text-white text-xl"
         }`}
       >
-        {value}
-      </p>
-
-    </div>
-  );
-}
-
-
-/* ==================================================
-   PROTOCOL METRIC
-================================================== */
-
-function ProtocolMetric({
-  label,
-  value,
-}) {
-  return (
-    <div className="rounded-xl border border-white/5 bg-black/30 p-4">
-
-      <p className="text-[#5f665c] text-[8px] tracking-[0.18em]">
-        {label}
-      </p>
-
-      <p className="text-white text-xl font-black mt-2">
         {value}
       </p>
 
@@ -1394,9 +1286,9 @@ function ExerciseStat({
   value,
 }) {
   return (
-    <div className="rounded-lg border border-white/5 bg-black/30 px-3 py-2 text-center">
+    <div className="bg-[#141614] border border-[#444933]/30 rounded-lg px-3 py-2 text-center">
 
-      <p className="text-[#5f665c] text-[8px] tracking-wider">
+      <p className="text-[#656b5d] text-[9px] tracking-wider">
         {label}
       </p>
 
@@ -1421,12 +1313,14 @@ function StatusBadge({
   let classes =
     "text-[#ccff00] border-[#ccff00]/30 bg-[#ccff00]/5";
 
+
   if (
     type === "complete"
   ) {
     classes =
       "text-[#00ff95] border-[#00ff95]/30 bg-[#00ff95]/5";
   }
+
 
   if (
     type === "recovery"
@@ -1436,9 +1330,17 @@ function StatusBadge({
   }
 
 
+  if (
+    type === "locked"
+  ) {
+    classes =
+      "text-[#707766] border-[#444933]/40 bg-[#141414]";
+  }
+
+
   return (
     <span
-      className={`text-[9px] font-bold tracking-[0.15em] border px-3 py-2 rounded-full ${classes}`}
+      className={`text-xs font-bold border px-3 py-2 rounded-full ${classes}`}
     >
       {text}
     </span>
@@ -1447,7 +1349,7 @@ function StatusBadge({
 
 
 /* ==================================================
-   FORMAT
+   TEXT FORMAT
 ================================================== */
 
 function formatText(
@@ -1458,10 +1360,7 @@ function formatText(
   }
 
   return value
-    .replaceAll(
-      "_",
-      " "
-    )
+    .replaceAll("_", " ")
     .replace(
       /\b\w/g,
       (letter) =>
