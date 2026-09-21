@@ -24,8 +24,11 @@ from core.views import (
     safe_mode_progress,
     toggle_workout_exercise,
     workout_stats,
+
+    # DIET
     generate_diet_plan,
     get_active_diet_plan,
+    complete_diet_day,
     nutrition_chat,
 
     # MEMBERSHIP
@@ -258,6 +261,16 @@ urlpatterns = [
         "api/diet/active/",
         get_active_diet_plan,
         name="active-diet-plan"
+    ),
+
+    # --------------------------------------------------------
+    # COMPLETE DIET DAY
+    # --------------------------------------------------------
+
+    path(
+        "api/diet/complete-day/",
+        complete_diet_day,
+        name="complete-diet-day"
     ),
 
 
