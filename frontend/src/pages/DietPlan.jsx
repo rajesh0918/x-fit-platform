@@ -33,6 +33,12 @@ function DietPlan() {
   const [error, setError] =
     useState("");
 
+  const [selectedDay, setSelectedDay] =
+    useState(1);
+
+  const [completingDay, setCompletingDay] =
+    useState(false);
+
 
   // ==================================================
   // LOAD ACTIVE DIET PLAN
@@ -152,6 +158,86 @@ function DietPlan() {
         setGenerating(false);
       }
     };
+
+
+  useEffect(() => {
+    if (plan?.current_day) {
+      setSelectedDay(
+        Math.min(
+          Number(plan.current_day),
+          7
+        )
+      );
+    }
+  }, [plan?.current_day]);
+
+
+  // ==================================================
+  // COMPLETE CURRENT NUTRITION DAY
+  // ==================================================
+
+  const completeDay = async () => {
+    if (!plan || completingDay) return;
+
+    if (
+      Number(selectedDay) !==
+      Number(plan.current_day)
+    ) {
+      return;
+    }
+
+    try {
+      setCompletingDay(true);
+      setError("");
+
+      const response =
+        await apiFetch(
+          "/diet/complete-day/",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              day: Number(selectedDay),
+            }),
+          }
+        );
+
+      if (!response) return;
+
+      const data =
+        await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ||
+            "Could not complete nutrition day."
+        );
+      }
+
+      setPlan(data);
+
+      if (data.current_day <= 7) {
+        setSelectedDay(
+          Number(data.current_day)
+        );
+      }
+    } catch (err) {
+      console.error(
+        "Nutrition day completion error:",
+        err
+      );
+
+      setError(
+        err.message ||
+          "Could not complete nutrition day."
+      );
+    } finally {
+      setCompletingDay(false);
+    }
+  };
 
 
   // ==================================================
@@ -714,6 +800,40 @@ function DietPlan() {
 
 
             {/* ==================================================
+                PERSONAL NUTRITION TARGETS
+            ================================================== */}
+
+            <section className="rounded-[28px] border border-[#ccff00]/20 bg-black/35 backdrop-blur-xl p-7 md:p-8 mb-7">
+
+              <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+                <div>
+                  <p className="text-[#ccff00] text-[9px] tracking-[0.24em]">
+                    PERSONAL TARGET SYSTEM
+                  </p>
+                  <h2 className="text-3xl font-black mt-2">
+                    Your Daily Numbers
+                  </h2>
+                  <p className="text-[#858c80] mt-2 text-sm">
+                    Targets are calculated from your saved body measurements, goal and diet preference.
+                  </p>
+                </div>
+
+                <div className="text-[#ccff00] font-black text-sm">
+                  🔥 {plan.streak || 0} Day Streak
+                </div>
+              </div>
+
+              <div className="grid sm:grid-cols-2 xl:grid-cols-5 gap-4 mt-7">
+                <TargetCard label="BMI" value={plan.bmi ?? "—"} sub={plan.bmi_category || "—"} />
+                <TargetCard label="EAT" value={`${plan.calorie_target || plan.daily_calories} kcal`} sub="Daily intake target" highlight />
+                <TargetCard label="PROTEIN" value={`${plan.protein_grams} g`} sub="Daily target" />
+                <TargetCard label="BURN" value={`${plan.exercise_burn_target || 0} kcal`} sub="Exercise target" />
+                <TargetCard label="HYDRATION" value={`${plan.hydration_liters || 0} L`} sub="Daily water target" />
+              </div>
+            </section>
+
+
+            {/* ==================================================
                 MACRO SYSTEM
             ================================================== */}
 
@@ -787,65 +907,128 @@ function DietPlan() {
 
 
             {/* ==================================================
-                MEAL ARCHITECTURE
+                7-DAY NUTRITION PROGRESSION
             ================================================== */}
 
             <section>
 
               <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6">
-
                 <div>
-
                   <p className="text-[#ccff00] text-[9px] tracking-[0.24em]">
-                    DAILY PROTOCOL
+                    7-DAY NUTRITION PROTOCOL
                   </p>
-
                   <h2 className="text-3xl md:text-4xl font-black mt-2">
-                    Meal Architecture
+                    Day-by-Day Meal Architecture
                   </h2>
-
+                  <p className="text-[#858c80] text-sm mt-2">
+                    Complete one nutrition day to unlock the next day. Every day has different meals.
+                  </p>
                 </div>
-
-
-                <span className="text-[#858c80] text-sm">
-                  {plan.meals?.length ||
-                    0}{" "}
-                  Meals
-                </span>
-
               </div>
 
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-7">
+                {(plan.days || []).map((day) => {
+                  const dayNumber = Number(day.day);
+                  const completed = (plan.completed_days || []).includes(dayNumber);
+                  const unlocked = dayNumber <= Number(plan.current_day || 1);
+                  const active = dayNumber === Number(selectedDay);
 
-              <div className="space-y-4">
-
-                {[...(plan.meals || [])]
-                  .sort(
-                    (a, b) =>
-                      a.order -
-                      b.order
-                  )
-                  .map(
-                    (
-                      meal,
-                      index
-                    ) => (
-
-                      <MealCard
-                        key={
-                          meal.id
-                        }
-                        meal={
-                          meal
-                        }
-                        index={
-                          index
-                        }
-                      />
-
-                    )
-                  )}
-
+                  return (
+                    <button
+                      key={dayNumber}
+                      type="button"
+                      disabled={!unlocked}
+                      onClick={() => setSelectedDay(dayNumber)}
+                      className={`rounded-xl border p-4 text-left transition ${
+                        active
+                          ? "border-[#ccff00] bg-[#ccff00]/10"
+                          : unlocked
+                            ? "border-white/10 bg-black/30 hover:border-[#ccff00]/40"
+                            : "border-white/5 bg-black/20 opacity-45 cursor-not-allowed"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[#ccff00] font-black text-xl">
+                          {String(dayNumber).padStart(2, "0")}
+                        </span>
+                        <span>
+                          {completed ? "✓" : unlocked ? "🔓" : "🔒"}
+                        </span>
+                      </div>
+                      <p className="text-white font-bold text-sm mt-2">
+                        Day {dayNumber}
+                      </p>
+                    </button>
+                  );
+                })}
               </div>
+
+              {(() => {
+                const activeDay =
+                  (plan.days || []).find(
+                    (day) => Number(day.day) === Number(selectedDay)
+                  );
+
+                if (!activeDay) {
+                  return null;
+                }
+
+                const completed =
+                  (plan.completed_days || []).includes(Number(selectedDay));
+
+                const unlocked =
+                  Number(selectedDay) <= Number(plan.current_day || 1);
+
+                return (
+                  <div>
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-5">
+                      <div>
+                        <p className="text-[#ccff00] text-[9px] tracking-[0.2em]">
+                          DAY {String(selectedDay).padStart(2, "0")}
+                        </p>
+                        <h3 className="text-2xl md:text-3xl font-black mt-1">
+                          {activeDay.title}
+                        </h3>
+                      </div>
+
+                      {completed && (
+                        <span className="text-[#ccff00] font-black">
+                          ✓ DAY COMPLETED
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="space-y-4">
+                      {activeDay.meals.map((meal, index) => (
+                        <MealCard
+                          key={`${selectedDay}-${meal.meal_type}-${index}`}
+                          meal={meal}
+                          index={index}
+                        />
+                      ))}
+                    </div>
+
+                    {unlocked && !completed && (
+                      <button
+                        type="button"
+                        onClick={completeDay}
+                        disabled={completingDay || Number(selectedDay) !== Number(plan.current_day)}
+                        className="w-full mt-6 rounded-xl bg-[#ccff00] text-black py-4 font-black tracking-[0.08em] hover:brightness-110 transition disabled:opacity-50"
+                      >
+                        {completingDay
+                          ? "COMPLETING DAY..."
+                          : `✓ COMPLETE DAY ${selectedDay} → UNLOCK NEXT DAY`}
+                      </button>
+                    )}
+
+                    {!unlocked && (
+                      <div className="mt-6 rounded-xl border border-white/10 bg-black/30 p-5 text-center text-[#858c80]">
+                        🔒 Complete Day {plan.current_day} first to unlock this nutrition day.
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
             </section>
 
@@ -978,6 +1161,42 @@ function FeatureMini({
         {text}
       </p>
 
+    </div>
+  );
+}
+
+
+/* ==================================================
+   TARGET CARD
+================================================== */
+
+function TargetCard({
+  label,
+  value,
+  sub,
+  highlight = false,
+}) {
+  return (
+    <div
+      className={`rounded-xl p-5 border ${
+        highlight
+          ? "bg-[#ccff00]/10 border-[#ccff00]/40"
+          : "bg-[#181818] border-white/10"
+      }`}
+    >
+      <p className="text-[#777e73] text-[9px] tracking-[0.18em]">
+        {label}
+      </p>
+      <p
+        className={`text-2xl font-black mt-2 ${
+          highlight ? "text-[#ccff00]" : "text-white"
+        }`}
+      >
+        {value}
+      </p>
+      <p className="text-[#858c80] text-[10px] mt-2">
+        {sub}
+      </p>
     </div>
   );
 }

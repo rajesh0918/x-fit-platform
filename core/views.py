@@ -4,7 +4,7 @@ from django.utils import timezone
 import os
 import razorpay
 
-from datetime import timedelta
+from datetime import timedelta, date
 import json
 import urllib.request
 import urllib.error
@@ -2343,417 +2343,363 @@ def safe_mode_progress(request):
 # GENERATE DIET PLAN
 # ==================================================
 
+
+def _diet_plan_payload(plan, profile):
+    data = plan.plan_data or {}
+    days = data.get("days", [])
+    completed_days = data.get("completed_days", [])
+    current_day = int(data.get("current_day", 1) or 1)
+    streak = int(data.get("streak", 0) or 0)
+
+    current = next(
+        (day for day in days if int(day.get("day", 0)) == current_day),
+        days[0] if days else {"day": 1, "meals": []},
+    )
+
+    return {
+        "id": plan.id,
+        "fitness_goal": plan.fitness_goal,
+        "dietary_preference": plan.dietary_preference,
+        "daily_calories": plan.daily_calories,
+        "protein_grams": plan.protein_grams,
+        "carbs_grams": plan.carbs_grams,
+        "fats_grams": plan.fats_grams,
+        "bmi": data.get("bmi"),
+        "bmi_category": data.get("bmi_category"),
+        "calorie_target": data.get("calorie_target", plan.daily_calories),
+        "exercise_burn_target": data.get("exercise_burn_target", 300),
+        "hydration_liters": data.get("hydration_liters"),
+        "days": days,
+        "completed_days": completed_days,
+        "current_day": current_day,
+        "next_day": current_day if current_day <= 7 else None,
+        "streak": streak,
+        "meals": current.get("meals", []),
+    }
+
+
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def generate_diet_plan(request):
-
     user = request.user
 
-    profile, created = (
-        Profile.objects.get_or_create(
-            user=user
-        )
-    )
+    profile, _ = Profile.objects.get_or_create(user=user)
 
     if not profile.weight:
-
         return Response(
-            {
-                "error":
-                    "Please add your weight in your profile first."
-            },
-            status=status.HTTP_400_BAD_REQUEST
+            {"error": "Please add your weight in your profile first."},
+            status=status.HTTP_400_BAD_REQUEST,
         )
 
-    goal = (
-        profile.fitness_goal
-        or "general_fitness"
-    )
+    if not profile.height:
+        return Response(
+            {"error": "Please add your height in your profile first."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
-    dietary_preference = (
-        profile.dietary_preference
-        or "vegetarian"
-    )
+    goal = profile.fitness_goal or "general_fitness"
+    dietary_preference = profile.dietary_preference or "vegetarian"
 
-    weight = float(
-        profile.weight
-    )
+    weight = float(profile.weight)
+    height_cm = float(profile.height)
+    age = int(profile.age or 25)
 
-    # Basic starting estimate.
-    # We can make this more advanced later.
-    daily_calories = int(
-        weight * 30
-    )
+    # BMI is calculated from the profile height/weight.
+    height_m = height_cm / 100.0
+    bmi = round(weight / (height_m * height_m), 1)
+
+    if bmi < 18.5:
+        bmi_category = "Underweight"
+    elif bmi < 25:
+        bmi_category = "Healthy range"
+    elif bmi < 30:
+        bmi_category = "Overweight"
+    else:
+        bmi_category = "Obesity range"
+
+    # This is an app-level starting estimate, not a medical prescription.
+    # Sex is not collected in the current profile model, so use a transparent
+    # weight-based maintenance estimate rather than pretending to know BMR.
+    daily_calories = int(weight * 30)
 
     if goal == "fat_loss":
         daily_calories -= 400
-
+        exercise_burn_target = 350
     elif goal == "muscle_gain":
         daily_calories += 300
-
+        exercise_burn_target = 250
     elif goal == "strength":
         daily_calories += 200
+        exercise_burn_target = 300
+    else:
+        exercise_burn_target = 300
 
-    daily_calories = max(
-        daily_calories,
-        1200
-    )
+    # Keep the target within a conservative app display range.
+    daily_calories = max(daily_calories, 1200)
 
-    protein_grams = int(
-        weight * 1.6
-    )
-
-    fats_grams = int(
-        weight * 0.8
-    )
-
-    protein_calories = (
-        protein_grams * 4
-    )
-
-    fat_calories = (
-        fats_grams * 9
-    )
+    protein_grams = int(round(weight * (1.6 if goal != "fat_loss" else 1.7)))
+    fats_grams = int(round(weight * 0.8))
 
     remaining_calories = max(
-        daily_calories
-        - protein_calories
-        - fat_calories,
-        0
+        daily_calories - (protein_grams * 4) - (fats_grams * 9),
+        0,
     )
+    carbs_grams = int(round(remaining_calories / 4))
+    hydration_liters = round(weight * 0.035, 1)
 
-    carbs_grams = int(
-        remaining_calories / 4
-    )
+    # Seven different days. Each day has breakfast, mid-morning snack,
+    # lunch, evening snack and dinner. Food choices change every day.
+    vegetarian_days = [
+        [
+            ("breakfast", "Paneer Oats Breakfast", ["Oats", "Milk", "Banana", "Paneer"]),
+            ("mid_morning", "Fruit & Curd", ["Apple", "Curd", "Chia seeds"]),
+            ("lunch", "Rajma Rice Bowl", ["Rice", "Rajma", "Mixed vegetables", "Salad"]),
+            ("evening_snack", "Roasted Chana Snack", ["Roasted chana", "Buttermilk"]),
+            ("dinner", "Roti Paneer Dinner", ["Roti", "Paneer bhurji", "Vegetables", "Salad"]),
+        ],
+        [
+            ("breakfast", "Besan Chilla Plate", ["Besan chilla", "Curd", "Tomato", "Mint chutney"]),
+            ("mid_morning", "Banana Nut Snack", ["Banana", "Almonds", "Milk"]),
+            ("lunch", "Dal Roti Protein Meal", ["Roti", "Dal", "Paneer", "Vegetables"]),
+            ("evening_snack", "Sprouts Chaat", ["Moong sprouts", "Onion", "Tomato", "Lemon"]),
+            ("dinner", "Soy Chunk Rice Bowl", ["Rice", "Soy chunks", "Vegetables", "Curd"]),
+        ],
+        [
+            ("breakfast", "Poha Protein Bowl", ["Poha", "Peanuts", "Peas", "Curd"]),
+            ("mid_morning", "Guava & Curd", ["Guava", "Curd", "Pumpkin seeds"]),
+            ("lunch", "Chole Rice Meal", ["Rice", "Chole", "Salad", "Curd"]),
+            ("evening_snack", "Paneer Snack", ["Paneer cubes", "Cucumber", "Black pepper"]),
+            ("dinner", "Ragi Roti Paneer", ["Ragi roti", "Paneer", "Vegetable sabzi", "Salad"]),
+        ],
+        [
+            ("breakfast", "Idli Sambar Protein", ["Idli", "Sambar", "Curd", "Coconut chutney"]),
+            ("mid_morning", "Orange Nut Bowl", ["Orange", "Walnuts", "Curd"]),
+            ("lunch", "Dal Khichdi Meal", ["Moong dal khichdi", "Paneer", "Vegetables", "Salad"]),
+            ("evening_snack", "Makhana Snack", ["Roasted makhana", "Milk"]),
+            ("dinner", "Roti Tofu Dinner", ["Roti", "Tofu", "Vegetables", "Curd"]),
+        ],
+        [
+            ("breakfast", "Paneer Paratha Plate", ["Paneer paratha", "Curd", "Fruit"]),
+            ("mid_morning", "Apple Peanut Snack", ["Apple", "Peanut butter", "Milk"]),
+            ("lunch", "Soya Pulao Meal", ["Soya pulao", "Raita", "Salad", "Vegetables"]),
+            ("evening_snack", "Chana Chaat", ["Boiled chana", "Tomato", "Onion", "Lemon"]),
+            ("dinner", "Dal Roti Paneer", ["Roti", "Dal", "Paneer", "Green vegetables"]),
+        ],
+        [
+            ("breakfast", "Upma & Paneer", ["Vegetable upma", "Paneer", "Milk"]),
+            ("mid_morning", "Papaya Curd Bowl", ["Papaya", "Curd", "Flax seeds"]),
+            ("lunch", "Matar Paneer Rice", ["Rice", "Matar paneer", "Salad", "Curd"]),
+            ("evening_snack", "Peanut Chaat", ["Roasted peanuts", "Onion", "Tomato", "Lemon"]),
+            ("dinner", "Besan Roti Dinner", ["Besan roti", "Dal", "Vegetables", "Curd"]),
+        ],
+        [
+            ("breakfast", "Dosa Sambar Breakfast", ["Dosa", "Sambar", "Paneer", "Chutney"]),
+            ("mid_morning", "Fruit Seed Bowl", ["Apple", "Banana", "Sunflower seeds", "Curd"]),
+            ("lunch", "Dal Paneer Rice", ["Rice", "Dal", "Paneer", "Vegetable sabzi"]),
+            ("evening_snack", "Roasted Makhana & Milk", ["Makhana", "Milk", "Almonds"]),
+            ("dinner", "Roti Chole Dinner", ["Roti", "Chole", "Vegetables", "Salad"]),
+        ],
+    ]
 
-    # Disable any older active diet plan
-    DietPlan.objects.filter(
-        user=user,
-        is_active=True
-    ).update(
-        is_active=False
-    )
+    non_vegetarian_days = [
+        [
+            ("breakfast", "Egg Oats Breakfast", ["Eggs", "Oats", "Banana", "Milk"]),
+            ("mid_morning", "Fruit & Curd", ["Apple", "Curd", "Almonds"]),
+            ("lunch", "Chicken Rice Bowl", ["Rice", "Chicken", "Vegetables", "Salad"]),
+            ("evening_snack", "Egg Protein Snack", ["Boiled eggs", "Fruit"]),
+            ("dinner", "Chicken Roti Dinner", ["Roti", "Chicken", "Vegetables", "Curd"]),
+        ],
+        [
+            ("breakfast", "Egg Besan Chilla", ["Eggs", "Besan chilla", "Curd", "Fruit"]),
+            ("mid_morning", "Banana Nut Bowl", ["Banana", "Walnuts", "Milk"]),
+            ("lunch", "Fish Rice Meal", ["Rice", "Grilled fish", "Vegetables", "Salad"]),
+            ("evening_snack", "Chicken Snack Bowl", ["Shredded chicken", "Cucumber", "Lemon"]),
+            ("dinner", "Egg Roti Dinner", ["Roti", "Egg bhurji", "Vegetables", "Curd"]),
+        ],
+        [
+            ("breakfast", "Omelette Toast", ["Egg omelette", "Whole wheat toast", "Milk", "Fruit"]),
+            ("mid_morning", "Papaya Curd", ["Papaya", "Curd", "Pumpkin seeds"]),
+            ("lunch", "Chicken Dal Rice", ["Rice", "Dal", "Chicken", "Salad"]),
+            ("evening_snack", "Egg Chaat", ["Boiled eggs", "Tomato", "Onion", "Lemon"]),
+            ("dinner", "Fish Roti Dinner", ["Roti", "Fish", "Vegetables", "Curd"]),
+        ],
+        [
+            ("breakfast", "Egg Poha", ["Poha", "Eggs", "Peanuts", "Fruit"]),
+            ("mid_morning", "Orange Milk Snack", ["Orange", "Milk", "Almonds"]),
+            ("lunch", "Chicken Roti Meal", ["Roti", "Chicken", "Vegetable sabzi", "Salad"]),
+            ("evening_snack", "Curd Egg Snack", ["Curd", "Boiled eggs", "Fruit"]),
+            ("dinner", "Fish Rice Dinner", ["Rice", "Fish curry", "Vegetables", "Salad"]),
+        ],
+        [
+            ("breakfast", "Egg Paratha Plate", ["Egg paratha", "Curd", "Fruit"]),
+            ("mid_morning", "Apple Peanut Snack", ["Apple", "Peanut butter", "Milk"]),
+            ("lunch", "Chicken Pulao", ["Chicken pulao", "Raita", "Salad", "Vegetables"]),
+            ("evening_snack", "Chicken Chaat", ["Chicken", "Onion", "Tomato", "Lemon"]),
+            ("dinner", "Egg Roti Meal", ["Roti", "Egg curry", "Vegetables", "Curd"]),
+        ],
+        [
+            ("breakfast", "Egg Upma", ["Vegetable upma", "Eggs", "Milk"]),
+            ("mid_morning", "Guava Curd Bowl", ["Guava", "Curd", "Seeds"]),
+            ("lunch", "Fish Rice Protein Meal", ["Rice", "Fish", "Dal", "Salad"]),
+            ("evening_snack", "Egg Makhana Snack", ["Boiled eggs", "Makhana"]),
+            ("dinner", "Chicken Roti Bowl", ["Roti", "Chicken", "Vegetables", "Curd"]),
+        ],
+        [
+            ("breakfast", "Egg Dosa Breakfast", ["Dosa", "Eggs", "Sambar", "Fruit"]),
+            ("mid_morning", "Fruit & Nuts", ["Banana", "Apple", "Almonds", "Curd"]),
+            ("lunch", "Chicken Dal Rice", ["Rice", "Chicken", "Dal", "Vegetables"]),
+            ("evening_snack", "Tuna/Chicken Salad", ["Tuna or chicken", "Cucumber", "Tomato", "Lemon"]),
+            ("dinner", "Fish Roti Dinner", ["Roti", "Fish", "Vegetables", "Curd"]),
+        ],
+    ]
+
+    vegan_days = [
+        [
+            ("breakfast", "Protein Oats", ["Oats", "Soy milk", "Banana", "Peanut butter"]),
+            ("mid_morning", "Fruit & Almonds", ["Apple", "Almonds", "Soy yogurt"]),
+            ("lunch", "Rajma Rice Bowl", ["Rice", "Rajma", "Vegetables", "Salad"]),
+            ("evening_snack", "Roasted Chana", ["Roasted chana", "Fruit"]),
+            ("dinner", "Tofu Roti Dinner", ["Roti", "Tofu", "Vegetables", "Salad"]),
+        ],
+        [
+            ("breakfast", "Besan Tofu Chilla", ["Besan chilla", "Tofu", "Tomato", "Chutney"]),
+            ("mid_morning", "Banana Peanut Bowl", ["Banana", "Peanut butter", "Soy milk"]),
+            ("lunch", "Dal Quinoa Bowl", ["Quinoa", "Dal", "Vegetables", "Salad"]),
+            ("evening_snack", "Sprouts Chaat", ["Moong sprouts", "Tomato", "Onion", "Lemon"]),
+            ("dinner", "Soy Chunk Rice", ["Rice", "Soy chunks", "Vegetables", "Tofu"]),
+        ],
+        [
+            ("breakfast", "Vegan Poha", ["Poha", "Peanuts", "Peas", "Soy yogurt"]),
+            ("mid_morning", "Guava Seed Bowl", ["Guava", "Pumpkin seeds", "Soy milk"]),
+            ("lunch", "Chole Rice Meal", ["Rice", "Chole", "Vegetables", "Salad"]),
+            ("evening_snack", "Tofu Snack", ["Tofu cubes", "Cucumber", "Lemon"]),
+            ("dinner", "Ragi Tofu Dinner", ["Ragi roti", "Tofu", "Vegetables", "Salad"]),
+        ],
+        [
+            ("breakfast", "Idli Sambar Vegan", ["Idli", "Sambar", "Peanut chutney", "Fruit"]),
+            ("mid_morning", "Orange Nuts", ["Orange", "Walnuts", "Soy yogurt"]),
+            ("lunch", "Moong Khichdi", ["Moong khichdi", "Tofu", "Vegetables", "Salad"]),
+            ("evening_snack", "Makhana Snack", ["Roasted makhana", "Soy milk"]),
+            ("dinner", "Tofu Roti Meal", ["Roti", "Tofu", "Vegetables", "Salad"]),
+        ],
+        [
+            ("breakfast", "Tofu Paratha", ["Tofu paratha", "Soy yogurt", "Fruit"]),
+            ("mid_morning", "Apple Peanut Snack", ["Apple", "Peanut butter", "Soy milk"]),
+            ("lunch", "Soya Pulao", ["Soya pulao", "Vegetables", "Salad", "Soy yogurt"]),
+            ("evening_snack", "Chana Chaat", ["Boiled chana", "Tomato", "Onion", "Lemon"]),
+            ("dinner", "Dal Tofu Roti", ["Roti", "Dal", "Tofu", "Vegetables"]),
+        ],
+        [
+            ("breakfast", "Vegan Upma", ["Vegetable upma", "Tofu", "Soy milk"]),
+            ("mid_morning", "Papaya Seed Bowl", ["Papaya", "Flax seeds", "Soy yogurt"]),
+            ("lunch", "Matar Tofu Rice", ["Rice", "Matar tofu", "Salad", "Vegetables"]),
+            ("evening_snack", "Peanut Chaat", ["Roasted peanuts", "Onion", "Tomato", "Lemon"]),
+            ("dinner", "Besan Roti Dinner", ["Besan roti", "Dal", "Vegetables", "Tofu"]),
+        ],
+        [
+            ("breakfast", "Vegan Dosa Breakfast", ["Dosa", "Sambar", "Tofu", "Chutney"]),
+            ("mid_morning", "Fruit Seed Bowl", ["Apple", "Banana", "Sunflower seeds", "Soy yogurt"]),
+            ("lunch", "Dal Soy Rice", ["Rice", "Dal", "Soy chunks", "Vegetables"]),
+            ("evening_snack", "Makhana & Soy Milk", ["Makhana", "Soy milk", "Almonds"]),
+            ("dinner", "Roti Chole Dinner", ["Roti", "Chole", "Vegetables", "Salad"]),
+        ],
+    ]
+
+    if dietary_preference == "vegan":
+        weekly_foods = vegan_days
+    elif dietary_preference == "non_vegetarian":
+        weekly_foods = non_vegetarian_days
+    else:
+        weekly_foods = vegetarian_days
+
+    meal_percentages = [0.25, 0.10, 0.30, 0.10, 0.25]
+    meal_names = {
+        "breakfast": "Breakfast",
+        "mid_morning": "Mid Morning Snack",
+        "lunch": "Lunch",
+        "evening_snack": "Evening Snack",
+        "dinner": "Dinner",
+    }
+
+    days = []
+    for day_number, food_day in enumerate(weekly_foods, start=1):
+        meals = []
+        for index, (meal_type, title, foods) in enumerate(food_day):
+            if index < len(food_day) - 1:
+                meal_calories = int(round(daily_calories * meal_percentages[index]))
+                meal_protein = round(protein_grams * meal_percentages[index], 1)
+                meal_carbs = round(carbs_grams * meal_percentages[index], 1)
+                meal_fats = round(fats_grams * meal_percentages[index], 1)
+            else:
+                meal_calories = int(daily_calories - sum(m["calories"] for m in meals))
+                meal_protein = round(protein_grams - sum(m["protein"] for m in meals), 1)
+                meal_carbs = round(carbs_grams - sum(m["carbs"] for m in meals), 1)
+                meal_fats = round(fats_grams - sum(m["fats"] for m in meals), 1)
+
+            meals.append({
+                "meal_type": meal_type,
+                "label": meal_names[meal_type],
+                "title": title,
+                "foods": foods,
+                "calories": meal_calories,
+                "protein": meal_protein,
+                "carbs": meal_carbs,
+                "fats": meal_fats,
+            })
+
+        days.append({
+            "day": day_number,
+            "title": f"Nutrition Day {day_number}",
+            "meals": meals,
+        })
+
+    # New generation starts the user at Day 1.
+    plan_data = {
+        "bmi": bmi,
+        "bmi_category": bmi_category,
+        "calorie_target": daily_calories,
+        "exercise_burn_target": exercise_burn_target,
+        "hydration_liters": hydration_liters,
+        "age_used_for_estimate": age,
+        "days": days,
+        "completed_days": [],
+        "current_day": 1,
+        "streak": 0,
+        "last_completed_date": None,
+    }
+
+    DietPlan.objects.filter(user=user, is_active=True).update(is_active=False)
 
     plan = DietPlan.objects.create(
         user=user,
-
-        fitness_goal=
-            goal,
-
-        dietary_preference=
-            dietary_preference,
-
-        daily_calories=
-            daily_calories,
-
-        protein_grams=
-            protein_grams,
-
-        carbs_grams=
-            carbs_grams,
-
-        fats_grams=
-            fats_grams,
-
+        fitness_goal=goal,
+        dietary_preference=dietary_preference,
+        daily_calories=daily_calories,
+        protein_grams=protein_grams,
+        carbs_grams=carbs_grams,
+        fats_grams=fats_grams,
+        plan_data=plan_data,
         is_active=True,
     )
 
-
-    # ==================================================
-    # VEGAN PLAN
-    # ==================================================
-
-    if dietary_preference == "vegan":
-
-        meals = [
-            {
-                "meal_type":
-                    "breakfast",
-
-                "title":
-                    "High Protein Oats",
-
-                "foods": [
-                    "Oats",
-                    "Soy milk",
-                    "Banana",
-                    "Peanut butter",
-                ],
-            },
-            {
-                "meal_type":
-                    "mid_morning",
-
-                "title":
-                    "Fruit & Nuts",
-
-                "foods": [
-                    "Apple",
-                    "Almonds",
-                ],
-            },
-            {
-                "meal_type":
-                    "lunch",
-
-                "title":
-                    "Rice & Dal Bowl",
-
-                "foods": [
-                    "Rice",
-                    "Dal",
-                    "Mixed vegetables",
-                    "Salad",
-                ],
-            },
-            {
-                "meal_type":
-                    "evening_snack",
-
-                "title":
-                    "Roasted Chana",
-
-                "foods": [
-                    "Roasted chana",
-                    "Green tea",
-                ],
-            },
-            {
-                "meal_type":
-                    "dinner",
-
-                "title":
-                    "Tofu Roti Meal",
-
-                "foods": [
-                    "Roti",
-                    "Tofu",
-                    "Vegetables",
-                ],
-            },
-        ]
-
-
-    # ==================================================
-    # NON VEGETARIAN PLAN
-    # ==================================================
-
-    elif dietary_preference == "non_vegetarian":
-
-        meals = [
-            {
-                "meal_type":
-                    "breakfast",
-
-                "title":
-                    "Egg Breakfast",
-
-                "foods": [
-                    "Eggs",
-                    "Oats",
-                    "Banana",
-                ],
-            },
-            {
-                "meal_type":
-                    "mid_morning",
-
-                "title":
-                    "Fruit & Curd",
-
-                "foods": [
-                    "Fruit",
-                    "Curd",
-                ],
-            },
-            {
-                "meal_type":
-                    "lunch",
-
-                "title":
-                    "Chicken Rice Meal",
-
-                "foods": [
-                    "Rice",
-                    "Chicken",
-                    "Vegetables",
-                    "Salad",
-                ],
-            },
-            {
-                "meal_type":
-                    "evening_snack",
-
-                "title":
-                    "Protein Snack",
-
-                "foods": [
-                    "Boiled eggs",
-                    "Fruit",
-                ],
-            },
-            {
-                "meal_type":
-                    "dinner",
-
-                "title":
-                    "Chicken Roti Meal",
-
-                "foods": [
-                    "Roti",
-                    "Chicken",
-                    "Vegetables",
-                ],
-            },
-        ]
-
-
-    # ==================================================
-    # VEGETARIAN PLAN
-    # ==================================================
-
-    else:
-
-        meals = [
-            {
-                "meal_type":
-                    "breakfast",
-
-                "title":
-                    "Paneer Oats Breakfast",
-
-                "foods": [
-                    "Oats",
-                    "Milk",
-                    "Banana",
-                    "Paneer",
-                ],
-            },
-            {
-                "meal_type":
-                    "mid_morning",
-
-                "title":
-                    "Fruit & Curd",
-
-                "foods": [
-                    "Seasonal fruit",
-                    "Curd",
-                ],
-            },
-            {
-                "meal_type":
-                    "lunch",
-
-                "title":
-                    "Rice Dal Paneer Meal",
-
-                "foods": [
-                    "Rice",
-                    "Dal",
-                    "Paneer",
-                    "Vegetables",
-                    "Salad",
-                ],
-            },
-            {
-                "meal_type":
-                    "evening_snack",
-
-                "title":
-                    "Roasted Chana Snack",
-
-                "foods": [
-                    "Roasted chana",
-                    "Fruit",
-                ],
-            },
-            {
-                "meal_type":
-                    "dinner",
-
-                "title":
-                    "Roti Paneer Meal",
-
-                "foods": [
-                    "Roti",
-                    "Paneer",
-                    "Vegetables",
-                ],
-            },
-        ]
-
-
-    # ==================================================
-    # DIVIDE DAILY MACROS ACROSS MEALS
-    # ==================================================
-
-    meal_count = len(
-        meals
-    )
-
-    meal_calories = int(
-        daily_calories /
-        meal_count
-    )
-
-    meal_protein = round(
-        protein_grams /
-        meal_count,
-        1
-    )
-
-    meal_carbs = round(
-        carbs_grams /
-        meal_count,
-        1
-    )
-
-    meal_fats = round(
-        fats_grams /
-        meal_count,
-        1
-    )
-
-    for index, meal in enumerate(
-        meals,
-        start=1
-    ):
-
+    # Keep the existing DietMeal table populated for compatibility with
+    # older screens/APIs, using Day 1 meals as the legacy view.
+    for index, meal in enumerate(days[0]["meals"], start=1):
         DietMeal.objects.create(
             plan=plan,
-
-            meal_type=
-                meal["meal_type"],
-
-            title=
-                meal["title"],
-
-            foods=
-                meal["foods"],
-
-            calories=
-                meal_calories,
-
-            protein=
-                meal_protein,
-
-            carbs=
-                meal_carbs,
-
-            fats=
-                meal_fats,
-
+            meal_type=meal["meal_type"],
+            title=meal["title"],
+            foods=meal["foods"],
+            calories=meal["calories"],
+            protein=meal["protein"],
+            carbs=meal["carbs"],
+            fats=meal["fats"],
             order=index,
         )
 
-    serializer = DietPlanSerializer(
-        plan
-    )
-
     return Response(
-        serializer.data,
-        status=status.HTTP_201_CREATED
+        _diet_plan_payload(plan, profile),
+        status=status.HTTP_201_CREATED,
     )
 
 
@@ -2764,39 +2710,111 @@ def generate_diet_plan(request):
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def get_active_diet_plan(request):
-
     plan = (
         DietPlan.objects
-        .filter(
-            user=request.user,
-            is_active=True
-        )
-        .order_by(
-            "-created_at"
-        )
+        .filter(user=request.user, is_active=True)
+        .order_by("-created_at")
         .first()
     )
 
     if not plan:
-
         return Response(
-            {
-                "error":
-                    "No active diet plan found."
-            },
-            status=status.HTTP_404_NOT_FOUND
+            {"error": "No active diet plan found."},
+            status=status.HTTP_404_NOT_FOUND,
         )
 
-    serializer = DietPlanSerializer(
-        plan
+    profile, _ = Profile.objects.get_or_create(user=request.user)
+    return Response(
+        _diet_plan_payload(plan, profile),
+        status=status.HTTP_200_OK,
     )
 
-    return Response(
-        serializer.data,
-        status=status.HTTP_200_OK
-    )
 
 # ==================================================
+# COMPLETE DIET DAY
+# ==================================================
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def complete_diet_day(request):
+    plan = (
+        DietPlan.objects
+        .filter(user=request.user, is_active=True)
+        .order_by("-created_at")
+        .first()
+    )
+
+    if not plan:
+        return Response(
+            {"error": "No active diet plan found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    try:
+        day_number = int(request.data.get("day", 0))
+    except (TypeError, ValueError):
+        day_number = 0
+
+    data = plan.plan_data or {}
+    completed_days = [int(x) for x in data.get("completed_days", [])]
+    current_day = int(data.get("current_day", 1) or 1)
+
+    if day_number != current_day:
+        return Response(
+            {
+                "error": f"Complete Day {current_day} first.",
+                "current_day": current_day,
+                "completed_days": completed_days,
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if day_number not in completed_days:
+        completed_days.append(day_number)
+        completed_days.sort()
+
+    today = timezone.localdate()
+    last_date = data.get("last_completed_date")
+    streak = int(data.get("streak", 0) or 0)
+
+    if last_date != today.isoformat():
+        if last_date:
+            try:
+                previous = timezone.datetime.fromisoformat(last_date).date()
+            except ValueError:
+                previous = None
+        else:
+            previous = None
+
+        if previous and (today - previous).days == 1:
+            streak += 1
+        else:
+            streak = 1
+
+        data["last_completed_date"] = today.isoformat()
+
+    next_day = current_day + 1 if current_day < 7 else None
+    data["completed_days"] = completed_days
+    data["current_day"] = next_day or 8
+    data["streak"] = streak
+    plan.plan_data = data
+    plan.save(update_fields=["plan_data", "updated_at"])
+
+    profile, _ = Profile.objects.get_or_create(user=request.user)
+
+    return Response(
+        {
+            "message": (
+                f"Nutrition Day {day_number} completed."
+                if next_day
+                else "7-day nutrition plan completed."
+            ),
+            **_diet_plan_payload(plan, profile),
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
 # AI NUTRITION CHAT
 # ==================================================
 
