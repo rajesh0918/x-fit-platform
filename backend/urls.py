@@ -243,6 +243,11 @@ urlpatterns = [
     submit_upi_payment,
     name="membership-submit-upi"
 ),
+    path(
+    "api/membership/submit-upi-payment/",
+    submit_upi_payment,
+    name="membership-submit-upi-payment",
+),
 
     # SHOP
     path(
