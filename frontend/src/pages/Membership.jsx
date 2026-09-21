@@ -1,13 +1,10 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
-
 import apiFetch from "../services/api";
 import CinematicBackground from "../components/futuristic/CinematicBackground";
 
-
 function Membership() {
-
   const navigate = useNavigate();
 
   const [plans, setPlans] = useState([]);
@@ -16,430 +13,224 @@ function Membership() {
 
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
-
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-
-  const [selectedPlan, setSelectedPlan] = useState(null);
-  const [showPayment, setShowPayment] = useState(false);
-
-  // PAYMENT SCREENSHOT
-  const [paymentScreenshot, setPaymentScreenshot] = useState(null);
-
-
-  /* =========================================================
-     LOAD MEMBERSHIP DATA
-  ========================================================= */
 
   useEffect(() => {
     loadMembershipData();
   }, []);
 
-
   const loadMembershipData = async () => {
-
     setLoading(true);
     setError("");
 
     try {
+      const [plansResponse, statusResponse, historyResponse] =
+        await Promise.all([
+          apiFetch("/membership/plans/"),
+          apiFetch("/membership/status/"),
+          apiFetch("/membership/history/"),
+        ]);
 
-      const [
-        plansResponse,
-        statusResponse,
-        historyResponse
-      ] = await Promise.all([
-
-        apiFetch(
-          "/membership/plans/"
-        ),
-
-        apiFetch(
-          "/membership/status/"
-        ),
-
-        apiFetch(
-          "/membership/history/"
-        )
-
-      ]);
-
-
-      if (
-        !plansResponse ||
-        !statusResponse ||
-        !historyResponse
-      ) {
+      if (!plansResponse || !statusResponse || !historyResponse) {
         return;
       }
 
-
-      const plansData =
-        await plansResponse.json();
-
-      const statusData =
-        await statusResponse.json();
-
-      const historyData =
-        await historyResponse.json();
-
+      const plansData = await plansResponse.json();
+      const statusData = await statusResponse.json();
+      const historyData = await historyResponse.json();
 
       if (!plansResponse.ok) {
-
         throw new Error(
-          plansData.error ||
-          "Unable to load membership plans."
+          plansData.error || "Unable to load membership plans."
         );
-
       }
-
 
       if (!statusResponse.ok) {
-
         throw new Error(
-          statusData.error ||
-          "Unable to load membership status."
+          statusData.error || "Unable to load membership status."
         );
-
       }
-
 
       if (!historyResponse.ok) {
-
         throw new Error(
-          historyData.error ||
-          "Unable to load membership history."
+          historyData.error || "Unable to load membership history."
         );
-
       }
 
-
-      setPlans(
-        plansData.plans ||
-        plansData ||
-        []
-      );
-
-
-      setStatus(
-        statusData
-      );
-
+      setPlans(plansData.plans || plansData || []);
+      setStatus(statusData);
 
       setHistory(
         historyData.memberships ||
-        historyData.history ||
-        historyData ||
-        []
+          historyData.history ||
+          historyData ||
+          []
       );
-
-
     } catch (err) {
-
-      console.error(
-        "Membership loading error:",
-        err
-      );
+      console.error("Membership loading error:", err);
 
       setError(
-        err.message ||
-        "Membership system connection failed."
+        err.message || "Membership system connection failed."
       );
-
     } finally {
-
       setLoading(false);
-
     }
-
   };
 
+  // =========================================================
+  // UPI PAYMENT SUBMISSION
+  // =========================================================
 
-  /* =========================================================
-     OPEN UPI PAYMENT
-  ========================================================= */
-
-  const startPayment = (plan) => {
-
-    setError("");
-    setMessage("");
-
-    setPaymentScreenshot(null);
-
-    setSelectedPlan(plan);
-
-    setShowPayment(true);
-
-  };
-
-
-  /* =========================================================
-     CLOSE PAYMENT
-  ========================================================= */
-
-  const closePayment = () => {
-
-    if (processing) {
-      return;
-    }
-
-    setShowPayment(false);
-
-    setSelectedPlan(null);
-
-    setPaymentScreenshot(null);
-
-  };
-
-
-  /* =========================================================
-     SUBMIT UPI PAYMENT
-  ========================================================= */
-
-  const submitUPIPayment = async () => {
-
-    if (
-      processing ||
-      !selectedPlan
-    ) {
-      return;
-    }
-
-
-    if (!paymentScreenshot) {
-
-      setError(
-        "Please upload your payment screenshot first."
-      );
-
-      return;
-
-    }
-
+  const startPayment = async (plan) => {
+    if (processing) return;
 
     setProcessing(true);
     setError("");
     setMessage("");
 
-
     try {
-
-      const planName =
-        selectedPlan.plan ||
-        selectedPlan.id ||
-        selectedPlan.name;
-
-
-      const formData =
-        new FormData();
-
-
-      formData.append(
-        "plan",
-        planName
+      const response = await apiFetch(
+        "/membership/submit-upi/",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            plan: plan.plan || plan.id || plan.name,
+          }),
+        }
       );
-
-
-      formData.append(
-        "payment_screenshot",
-        paymentScreenshot
-      );
-
-
-      const response =
-        await apiFetch(
-          "/membership/submit-upi-payment/",
-          {
-            method: "POST",
-            body: formData
-          }
-        );
-
 
       if (!response) {
+        setProcessing(false);
         return;
       }
 
-
-      const data =
-        await response.json();
-
+      const data = await response.json();
 
       if (!response.ok) {
-
         throw new Error(
           data.error ||
-          data.detail ||
-          "Unable to submit payment."
+            data.detail ||
+            "Unable to submit membership payment."
         );
-
       }
 
-
       setMessage(
-        "PAYMENT PROOF SUBMITTED. WAITING FOR VERIFICATION."
+        `PAYMENT SUBMITTED. ${
+          data.plan_name || "Membership"
+        } IS AWAITING VERIFICATION.`
       );
-
-
-      setShowPayment(false);
-
-      setSelectedPlan(null);
-
-      setPaymentScreenshot(null);
-
-
-      await loadMembershipData();
-
-
-    } catch (err) {
-
-      console.error(
-        "UPI payment error:",
-        err
-      );
-
-
-      setError(
-        err.message ||
-        "Payment submission failed."
-      );
-
-    } finally {
 
       setProcessing(false);
 
-    }
+      await loadMembershipData();
+    } catch (err) {
+      console.error(
+        "UPI membership payment error:",
+        err
+      );
 
+      setError(
+        err.message ||
+          "Membership payment submission failed."
+      );
+
+      setProcessing(false);
+    }
   };
 
-
-  /* =========================================================
-     PLAN NAME
-  ========================================================= */
+  // =========================================================
+  // FORMAT PLAN NAME
+  // =========================================================
 
   const formatPlanName = (plan) => {
+    if (!plan) return "Membership";
 
-    if (!plan) {
-      return "Membership";
+    const normalized = String(plan).toLowerCase();
+
+    if (normalized === "quarterly") {
+      return "Half-Yearly";
     }
 
+    if (normalized === "free_trial") {
+      return "Free Trial";
+    }
 
     return (
-      String(plan)
-        .charAt(0)
-        .toUpperCase() +
+      String(plan).charAt(0).toUpperCase() +
       String(plan).slice(1)
     );
-
   };
 
-
-  /* =========================================================
-     AMOUNT
-  ========================================================= */
+  // =========================================================
+  // FORMAT PRICE
+  // =========================================================
 
   const formatAmount = (amount) => {
+    const value = Number(amount || 0);
 
-    const value =
-      Number(amount || 0);
-
-
-    return `₹${value.toLocaleString(
-      "en-IN"
-    )}`;
-
+    return `₹${value.toLocaleString("en-IN")}`;
   };
 
-
-  /* =========================================================
-     DURATION
-  ========================================================= */
+  // =========================================================
+  // PLAN DURATION
+  // =========================================================
 
   const getDuration = (plan) => {
-
-    const name =
-      String(
-        plan.plan ||
+    const name = String(
+      plan.plan ||
         plan.id ||
         plan.name ||
         ""
-      ).toLowerCase();
+    ).toLowerCase();
 
-
-    if (
-      name.includes("monthly")
-    ) {
+    if (name.includes("monthly")) {
       return "30 DAYS";
     }
 
-
     if (
-      name.includes("quarter")
+      name.includes("quarter") ||
+      name.includes("half")
     ) {
-      return "90 DAYS";
+      return "180 DAYS";
     }
 
-
-    if (
-      name.includes("year")
-    ) {
+    if (name.includes("year")) {
       return "365 DAYS";
     }
-
 
     return plan.duration_days
       ? `${plan.duration_days} DAYS`
       : "MEMBERSHIP";
-
   };
 
-
-  /* =========================================================
-     ACTIVE MEMBERSHIP
-  ========================================================= */
+  // =========================================================
+  // MEMBERSHIP STATUS
+  // =========================================================
 
   const isActive =
     status?.active === true ||
     status?.is_active === true ||
     status?.membership?.is_active === true;
 
+  const isFreeTrial =
+    status?.membership_type === "free_trial" ||
+    status?.trial === true;
 
-  /* =========================================================
-     LOADING SCREEN
-  ========================================================= */
-
-  if (loading) {
-
-    return (
-
-      <div className="min-h-screen bg-black text-white flex items-center justify-center">
-
-        <div className="text-center">
-
-          <div className="w-10 h-10 rounded-full border-2 border-[#ccff00]/20 border-t-[#ccff00] animate-spin mx-auto" />
-
-          <p className="mt-5 text-[9px] tracking-[0.25em] text-white/30">
-            LOADING MEMBERSHIP SYSTEM
-          </p>
-
-        </div>
-
-      </div>
-
-    );
-
-  }
-
+  const trialExpired =
+    status?.trial_expired === true;
 
   return (
-
     <div className="relative min-h-screen bg-black text-white overflow-x-hidden">
 
       <CinematicBackground />
 
-
       {/* =====================================================
           NAVBAR
-      ===================================================== */}
+      ====================================================== */}
 
       <nav className="fixed top-0 left-0 right-0 z-50 px-5 md:px-10 py-5">
 
@@ -447,14 +238,10 @@ function Membership() {
 
           <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-black/55 backdrop-blur-xl px-5 py-3">
 
-
             {/* LOGO */}
 
             <button
-              onClick={() =>
-                navigate("/")
-              }
-
+              onClick={() => navigate("/")}
               className="flex items-center gap-3"
             >
 
@@ -465,7 +252,6 @@ function Membership() {
                 </span>
 
               </div>
-
 
               <div>
 
@@ -481,89 +267,60 @@ function Membership() {
 
             </button>
 
-
             {/* DESKTOP NAV */}
 
             <div className="hidden md:flex items-center gap-7 text-[10px] tracking-[0.16em]">
 
               <button
-                onClick={() =>
-                  navigate("/dashboard")
-                }
-
+                onClick={() => navigate("/dashboard")}
                 className="text-white/50 hover:text-[#ccff00] transition"
               >
                 TODAY
               </button>
 
-
               <button
-                onClick={() =>
-                  navigate("/workout-plan")
-                }
-
+                onClick={() => navigate("/workouts")}
                 className="text-white/50 hover:text-[#ccff00] transition"
               >
                 TRAINING
               </button>
 
-
               <button
-                onClick={() =>
-                  navigate("/motioncheck")
-                }
-
+                onClick={() => navigate("/motion-check")}
                 className="text-white/50 hover:text-[#ccff00] transition"
               >
                 MOTIONCHECK
               </button>
 
-
               <button
-                onClick={() =>
-                  navigate("/diet-plan")
-                }
-
+                onClick={() => navigate("/nutrition")}
                 className="text-white/50 hover:text-[#ccff00] transition"
               >
                 NUTRITION
               </button>
 
-
               <button
-                onClick={() =>
-                  navigate("/progress-dna")
-                }
-
+                onClick={() => navigate("/progress-dna")}
                 className="text-white/50 hover:text-[#ccff00] transition"
               >
                 PROGRESS DNA
               </button>
 
-
-              <button
-                className="text-[#ccff00]"
-              >
+              <button className="text-[#ccff00]">
                 MEMBERSHIP
               </button>
 
             </div>
 
-
             {/* PROFILE */}
 
             <button
-              onClick={() =>
-                navigate("/profile")
-              }
-
+              onClick={() => navigate("/profile")}
               className="w-10 h-10 rounded-full border border-white/10 bg-white/5 flex items-center justify-center hover:border-[#ccff00]/50 transition"
             >
-
               <span className="text-xs">
                 ◉
               </span>
-
             </button>
 
           </div>
@@ -572,17 +329,17 @@ function Membership() {
 
       </nav>
 
-
       {/* =====================================================
           MAIN
-      ===================================================== */}
+      ====================================================== */}
 
       <main className="relative z-10 pt-36 pb-24 px-5 md:px-10">
 
         <div className="max-w-[1400px] mx-auto">
 
-
-          {/* HEADER */}
+          {/* =================================================
+              HEADER
+          ================================================= */}
 
           <div className="mb-12">
 
@@ -596,7 +353,6 @@ function Membership() {
 
             </div>
 
-
             <h1 className="text-5xl md:text-7xl font-black tracking-[-0.05em] leading-none">
 
               ACCESS
@@ -609,7 +365,6 @@ function Membership() {
 
             </h1>
 
-
             <p className="max-w-2xl mt-6 text-sm md:text-base text-white/45 leading-relaxed">
 
               Activate your X-FIT performance protocol.
@@ -621,25 +376,21 @@ function Membership() {
 
           </div>
 
-
           {/* =================================================
-              ACTIVE STATUS
-          ================================================= */}
+              FREE TRIAL / MEMBERSHIP STATUS
+          ================================================== */}
 
           {isActive && (
 
             <motion.div
-
               initial={{
                 opacity: 0,
-                y: 15
+                y: 15,
               }}
-
               animate={{
                 opacity: 1,
-                y: 0
+                y: 0,
               }}
-
               className="mb-10 rounded-2xl border border-[#ccff00]/25 bg-[#ccff00]/[0.04] p-5"
             >
 
@@ -648,43 +399,58 @@ function Membership() {
                 <div>
 
                   <p className="text-[9px] tracking-[0.25em] text-[#ccff00]">
-                    MEMBERSHIP ACTIVE
+
+                    {isFreeTrial
+                      ? "30-DAY FREE TRIAL"
+                      : "MEMBERSHIP ACTIVE"}
+
                   </p>
 
-
                   <h2 className="text-2xl font-black mt-2">
+
                     PERFORMANCE PROTOCOL ONLINE
+
                   </h2>
 
-                </div>
+                  {isFreeTrial && (
 
+                    <p className="text-xs text-white/40 mt-2">
 
-                <div className="text-left md:text-right">
+                      {status?.trial_days_remaining || 0}
+                      {" "}
+                      day(s) remaining.
 
-                  {status?.membership?.plan && (
+                      <br />
 
-                    <p className="text-sm font-bold">
-
-                      {formatPlanName(
-                        status.membership.plan
-                      )}
+                      After the trial, choose a paid
+                      protocol below.
 
                     </p>
 
                   )}
 
+                </div>
+
+                <div className="text-left md:text-right">
+
+                  <p className="text-sm font-bold">
+
+                    {status?.membership?.plan_name ||
+                      (isFreeTrial
+                        ? "X-FIT Free Trial"
+                        : "Membership")}
+
+                  </p>
 
                   {status?.membership?.expires_at && (
 
                     <p className="text-[10px] text-white/35 mt-1">
 
-                      EXPIRES{" "}
+                      ACCESS UNTIL{" "}
 
                       {new Date(
                         status.membership.expires_at
-                      ).toLocaleDateString(
-                        "en-IN"
-                      )}
+                      ).toLocaleDateString("en-IN")}
 
                     </p>
 
@@ -698,10 +464,47 @@ function Membership() {
 
           )}
 
+          {/* =================================================
+              TRIAL EXPIRED
+          ================================================== */}
+
+          {trialExpired && !isActive && (
+
+            <motion.div
+              initial={{
+                opacity: 0,
+                y: 15,
+              }}
+              animate={{
+                opacity: 1,
+                y: 0,
+              }}
+              className="mb-10 rounded-2xl border border-[#ccff00]/25 bg-[#ccff00]/[0.04] p-5"
+            >
+
+              <p className="text-[9px] tracking-[0.25em] text-[#ccff00]">
+                FREE TRIAL COMPLETE
+              </p>
+
+              <h2 className="text-2xl font-black mt-2">
+                CHOOSE YOUR PERFORMANCE PROTOCOL
+              </h2>
+
+              <p className="text-xs text-white/40 mt-2">
+
+                Your 30-day free access has ended.
+                Select a paid membership below and submit
+                your X-FIT UPI payment for manual verification.
+
+              </p>
+
+            </motion.div>
+
+          )}
 
           {/* =================================================
               ERROR
-          ================================================= */}
+          ================================================== */}
 
           {error && (
 
@@ -715,10 +518,9 @@ function Membership() {
 
           )}
 
-
           {/* =================================================
               SUCCESS MESSAGE
-          ================================================= */}
+          ================================================== */}
 
           {message && (
 
@@ -732,314 +534,337 @@ function Membership() {
 
           )}
 
-
           {/* =================================================
-              MEMBERSHIP PLANS
-          ================================================= */}
+              LOADING
+          ================================================== */}
 
-          <section>
+          {loading ? (
 
-            <div className="flex items-end justify-between mb-6">
+            <div className="min-h-[350px] flex items-center justify-center">
 
-              <div>
+              <div className="text-center">
 
-                <p className="text-[9px] tracking-[0.25em] text-white/30">
-                  SELECT PROTOCOL
+                <div className="w-10 h-10 rounded-full border-2 border-[#ccff00]/20 border-t-[#ccff00] animate-spin mx-auto" />
+
+                <p className="mt-5 text-[9px] tracking-[0.25em] text-white/30">
+
+                  LOADING MEMBERSHIP SYSTEM
+
                 </p>
-
-
-                <h2 className="text-2xl md:text-3xl font-black mt-2">
-                  MEMBERSHIP PLANS
-                </h2>
 
               </div>
 
-
-              <span className="hidden md:block text-[8px] tracking-[0.2em] text-[#ccff00]/60">
-                UPI PAYMENT
-              </span>
-
             </div>
 
+          ) : (
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <>
 
-              {plans.map(
-                (plan, index) => {
+              {/* =================================================
+                  PLANS
+              ================================================== */}
 
-                  const planName =
-                    plan.plan ||
-                    plan.id ||
-                    plan.name;
+              <section>
 
+                {/* UPI INFORMATION */}
 
-                  return (
+                <div className="mb-6 rounded-2xl border border-[#ccff00]/15 bg-[#ccff00]/[0.025] p-5">
 
-                    <motion.div
+                  <p className="text-[9px] tracking-[0.25em] text-[#ccff00]">
+                    X-FIT UPI PAYMENT
+                  </p>
 
-                      key={
-                        planName ||
-                        index
-                      }
+                  <p className="text-xs text-white/45 mt-2 leading-relaxed">
 
-                      initial={{
-                        opacity: 0,
-                        y: 25
-                      }}
+                    Pay the selected amount using the
+                    X-FIT UPI method, then press the
+                    payment button.
 
-                      animate={{
-                        opacity: 1,
-                        y: 0
-                      }}
+                    <br />
 
-                      transition={{
-                        delay:
-                          index * 0.08
-                      }}
+                    Your membership stays pending until
+                    the payment is manually verified.
 
-                      whileHover={{
-                        y: -6
-                      }}
+                  </p>
 
-                      className="relative group"
-                    >
+                </div>
 
-                      <div className="absolute inset-0 rounded-3xl bg-[#ccff00]/[0.025] blur-xl opacity-0 group-hover:opacity-100 transition" />
+                {/* PLAN TITLE */}
 
+                <div className="flex items-end justify-between mb-6">
 
-                      <div className="relative h-full rounded-3xl border border-white/10 bg-black/65 backdrop-blur-xl p-7 overflow-hidden">
+                  <div>
 
-                        <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#ccff00]/50 to-transparent opacity-50" />
+                    <p className="text-[9px] tracking-[0.25em] text-white/30">
+                      SELECT PROTOCOL
+                    </p>
 
+                    <h2 className="text-2xl md:text-3xl font-black mt-2">
+                      MEMBERSHIP PLANS
+                    </h2>
 
-                        <div className="flex items-center justify-between">
+                  </div>
 
-                          <span className="text-[9px] tracking-[0.25em] text-[#ccff00]">
-                            PROTOCOL 0{index + 1}
-                          </span>
+                  <span className="hidden md:block text-[8px] tracking-[0.2em] text-[#ccff00]/60">
 
+                    UPI PAYMENT • MANUAL VERIFICATION
 
-                          <span className="text-[8px] tracking-[0.15em] text-white/25">
-                            {getDuration(plan)}
-                          </span>
+                  </span>
+
+                </div>
+
+                {/* PLANS */}
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+
+                  {plans.map((plan, index) => {
+
+                    const planName =
+                      plan.plan ||
+                      plan.id ||
+                      plan.name;
+
+                    return (
+
+                      <motion.div
+                        key={planName || index}
+                        initial={{
+                          opacity: 0,
+                          y: 25,
+                        }}
+                        animate={{
+                          opacity: 1,
+                          y: 0,
+                        }}
+                        transition={{
+                          delay: index * 0.08,
+                        }}
+                        whileHover={{
+                          y: -6,
+                        }}
+                        className="relative group"
+                      >
+
+                        <div className="absolute inset-0 rounded-3xl bg-[#ccff00]/[0.025] blur-xl opacity-0 group-hover:opacity-100 transition" />
+
+                        <div className="relative h-full rounded-3xl border border-white/10 bg-black/65 backdrop-blur-xl p-7 overflow-hidden">
+
+                          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#ccff00]/50 to-transparent opacity-50" />
+
+                          {/* PLAN HEADER */}
+
+                          <div className="flex items-center justify-between">
+
+                            <span className="text-[9px] tracking-[0.25em] text-[#ccff00]">
+
+                              PROTOCOL 0{index + 1}
+
+                            </span>
+
+                            <span className="text-[8px] tracking-[0.15em] text-white/25">
+
+                              {getDuration(plan)}
+
+                            </span>
+
+                          </div>
+
+                          {/* PLAN NAME */}
+
+                          <h3 className="text-3xl font-black mt-7">
+
+                            {formatPlanName(planName)}
+
+                          </h3>
+
+                          {/* PRICE */}
+
+                          <div className="mt-6">
+
+                            <span className="text-5xl font-black text-[#ccff00]">
+
+                              {formatAmount(
+                                plan.amount
+                              )}
+
+                            </span>
+
+                            <span className="text-xs text-white/25 ml-2">
+                              INR
+                            </span>
+
+                          </div>
+
+                          {/* FEATURES */}
+
+                          <div className="mt-7 space-y-3 border-t border-white/10 pt-6">
+
+                            <Feature text="Workout performance tracking" />
+
+                            <Feature text="Nutrition protocol access" />
+
+                            <Feature text="MotionCheck analysis" />
+
+                            <Feature text="Progress DNA analytics" />
+
+                          </div>
+
+                          {/* PAYMENT BUTTON */}
+
+                          <button
+                            onClick={() =>
+                              startPayment(plan)
+                            }
+                            disabled={processing}
+                            className="w-full mt-8 py-4 rounded-xl bg-[#ccff00] text-black font-black text-xs tracking-[0.15em] hover:shadow-[0_0_35px_rgba(204,255,0,0.2)] transition disabled:opacity-40"
+                          >
+
+                            {processing
+                              ? "PROCESSING..."
+                              : "SUBMIT UPI PAYMENT →"}
+
+                          </button>
+
+                          <p className="text-center text-[7px] tracking-[0.12em] text-white/20 mt-3">
+
+                            PAY USING X-FIT UPI •
+                            MANUAL VERIFICATION
+
+                          </p>
 
                         </div>
 
+                      </motion.div>
 
-                        <h3 className="text-3xl font-black mt-7">
-                          {formatPlanName(
-                            planName
-                          )}
-                        </h3>
+                    );
 
+                  })}
 
-                        <div className="mt-6">
+                </div>
 
-                          <span className="text-5xl font-black text-[#ccff00]">
+              </section>
+
+              {/* =================================================
+                  PAYMENT HISTORY
+              ================================================== */}
+
+              <section className="mt-20">
+
+                <div className="mb-6">
+
+                  <p className="text-[9px] tracking-[0.25em] text-white/30">
+                    TRANSACTION ARCHIVE
+                  </p>
+
+                  <h2 className="text-2xl md:text-3xl font-black mt-2">
+                    PAYMENT HISTORY
+                  </h2>
+
+                </div>
+
+                {history.length === 0 ? (
+
+                  <div className="rounded-2xl border border-white/10 bg-black/50 p-8">
+
+                    <p className="text-xs text-white/30">
+
+                      No membership transactions recorded.
+
+                    </p>
+
+                  </div>
+
+                ) : (
+
+                  <div className="rounded-2xl border border-white/10 bg-black/55 overflow-hidden">
+
+                    {history.map((item, index) => (
+
+                      <div
+                        key={item.id || index}
+                        className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 px-5 md:px-7 py-5 border-b border-white/5 last:border-b-0"
+                      >
+
+                        <div>
+
+                          <p className="font-bold text-sm">
+
+                            {formatPlanName(
+                              item.plan
+                            )}
+
+                          </p>
+
+                          <p className="text-[9px] text-white/25 mt-1 tracking-[0.1em]">
+
+                            {item.created_at
+                              ? new Date(
+                                  item.created_at
+                                ).toLocaleString(
+                                  "en-IN"
+                                )
+                              : "TRANSACTION"}
+
+                          </p>
+
+                        </div>
+
+                        <div className="flex items-center gap-5">
+
+                          <span className="text-sm font-black text-[#ccff00]">
 
                             {formatAmount(
-                              plan.amount
+                              item.amount
                             )}
 
                           </span>
 
+                          <span
+                            className={`text-[8px] tracking-[0.15em] px-3 py-1.5 rounded-full border ${
+                              item.status === "paid"
+                                ? "border-[#ccff00]/20 text-[#ccff00] bg-[#ccff00]/5"
+                                : "border-white/10 text-white/30"
+                            }`}
+                          >
 
-                          <span className="text-xs text-white/25 ml-2">
-                            INR
+                            {String(
+                              item.status || "UNKNOWN"
+                            ).toUpperCase()}
+
                           </span>
 
                         </div>
 
-
-                        <div className="mt-7 space-y-3 border-t border-white/10 pt-6">
-
-                          <Feature text="Workout performance tracking" />
-
-                          <Feature text="Nutrition protocol access" />
-
-                          <Feature text="MotionCheck analysis" />
-
-                          <Feature text="Progress DNA analytics" />
-
-                        </div>
-
-
-                        <button
-
-                          onClick={() =>
-                            startPayment(
-                              plan
-                            )
-                          }
-
-                          disabled={
-                            processing
-                          }
-
-                          className="w-full mt-8 py-4 rounded-xl bg-[#ccff00] text-black font-black text-xs tracking-[0.15em] hover:shadow-[0_0_35px_rgba(204,255,0,0.2)] transition disabled:opacity-40"
-                        >
-
-                          ACTIVATE PROTOCOL →
-
-                        </button>
-
-
-                        <p className="text-center text-[7px] tracking-[0.12em] text-white/20 mt-3">
-                          PAY USING X-FIT UPI
-                        </p>
-
                       </div>
 
-                    </motion.div>
+                    ))}
 
-                  );
+                  </div>
 
-                }
-              )}
-
-            </div>
-
-          </section>
-
-
-          {/* =================================================
-              PAYMENT HISTORY
-          ================================================= */}
-
-          <section className="mt-20">
-
-            <div className="mb-6">
-
-              <p className="text-[9px] tracking-[0.25em] text-white/30">
-                TRANSACTION ARCHIVE
-              </p>
-
-
-              <h2 className="text-2xl md:text-3xl font-black mt-2">
-                PAYMENT HISTORY
-              </h2>
-
-            </div>
-
-
-            {history.length === 0 ? (
-
-              <div className="rounded-2xl border border-white/10 bg-black/50 p-8">
-
-                <p className="text-xs text-white/30">
-                  No membership transactions recorded.
-                </p>
-
-              </div>
-
-            ) : (
-
-              <div className="rounded-2xl border border-white/10 bg-black/55 overflow-hidden">
-
-                {history.map(
-                  (item, index) => (
-
-                    <div
-
-                      key={
-                        item.id ||
-                        index
-                      }
-
-                      className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 px-5 md:px-7 py-5 border-b border-white/5 last:border-b-0"
-                    >
-
-                      <div>
-
-                        <p className="font-bold text-sm">
-
-                          {formatPlanName(
-                            item.plan
-                          )}
-
-                        </p>
-
-
-                        <p className="text-[9px] text-white/25 mt-1 tracking-[0.1em]">
-
-                          {item.created_at
-                            ? new Date(
-                                item.created_at
-                              ).toLocaleString(
-                                "en-IN"
-                              )
-                            : "TRANSACTION"}
-
-                        </p>
-
-                      </div>
-
-
-                      <div className="flex items-center gap-5">
-
-                        <span className="text-sm font-black text-[#ccff00]">
-
-                          {formatAmount(
-                            item.amount
-                          )}
-
-                        </span>
-
-
-                        <span
-
-                          className={`text-[8px] tracking-[0.15em] px-3 py-1.5 rounded-full border ${
-                            item.status ===
-                            "paid"
-
-                              ? "border-[#ccff00]/20 text-[#ccff00] bg-[#ccff00]/5"
-
-                              : item.status ===
-                                "created"
-
-                              ? "border-yellow-400/20 text-yellow-400 bg-yellow-400/5"
-
-                              : "border-white/10 text-white/30"
-                          }`}
-                        >
-
-                          {item.status ===
-                          "created"
-                            ? "AWAITING VERIFICATION"
-                            : String(
-                                item.status ||
-                                "UNKNOWN"
-                              ).toUpperCase()}
-
-                        </span>
-
-                      </div>
-
-                    </div>
-
-                  )
                 )}
 
-              </div>
+              </section>
 
-            )}
+            </>
 
-          </section>
-
+          )}
 
           {/* =================================================
               FOOTER
-          ================================================= */}
+          ================================================== */}
 
           <div className="mt-20 pt-7 border-t border-white/5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
 
             <p className="text-[8px] tracking-[0.2em] text-white/20">
+
               X-FIT // ATHLETE PERFORMANCE OPERATING SYSTEM
+
             </p>
 
-
             <p className="text-[8px] tracking-[0.15em] text-white/15">
-              UPI PAYMENT INFRASTRUCTURE
+
+              X-FIT UPI PAYMENT SYSTEM
+
             </p>
 
           </div>
@@ -1048,447 +873,16 @@ function Membership() {
 
       </main>
 
-
-      {/* =====================================================
-          UPI PAYMENT MODAL
-      ===================================================== */}
-
-      {showPayment &&
-        selectedPlan && (
-
-          <div className="fixed inset-0 z-[100] flex items-center justify-center px-5 py-8">
-
-            {/* BACKDROP */}
-
-            <div
-              className="absolute inset-0 bg-black/90 backdrop-blur-md"
-              onClick={closePayment}
-            />
-
-
-            {/* MODAL */}
-
-            <motion.div
-
-              initial={{
-                opacity: 0,
-                scale: 0.94,
-                y: 20
-              }}
-
-              animate={{
-                opacity: 1,
-                scale: 1,
-                y: 0
-              }}
-
-              className="relative w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-[30px] border border-white/10 bg-[#050505] shadow-[0_0_80px_rgba(204,255,0,0.08)]"
-            >
-
-
-              {/* TOP BAR */}
-
-              <div className="flex items-center justify-between px-6 md:px-8 py-5 border-b border-white/10">
-
-                <div>
-
-                  <p className="text-[9px] tracking-[0.3em] text-[#ccff00]">
-                    X-FIT // PAYMENT PROTOCOL
-                  </p>
-
-
-                  <p className="text-sm font-black mt-1">
-                    UPI SECURE PAYMENT
-                  </p>
-
-                </div>
-
-
-                <button
-
-                  onClick={closePayment}
-
-                  className="w-9 h-9 rounded-full border border-white/10 text-white/50 hover:text-white hover:border-[#ccff00]/40 transition"
-                >
-                  ×
-                </button>
-
-              </div>
-
-
-              {/* CONTENT */}
-
-              <div className="grid md:grid-cols-2 gap-8 p-6 md:p-10">
-
-
-                {/* =================================================
-                    QR SECTION
-                ================================================= */}
-
-                <div className="text-center">
-
-                  <p className="text-[9px] tracking-[0.3em] text-white/30">
-                    SCAN TO PAY
-                  </p>
-
-
-                  <h2 className="text-3xl md:text-4xl font-black mt-3">
-
-                    {formatPlanName(
-                      selectedPlan.plan ||
-                      selectedPlan.id ||
-                      selectedPlan.name
-                    )}
-
-                  </h2>
-
-
-                  <div className="mt-5">
-
-                    <span className="text-4xl font-black text-[#ccff00]">
-
-                      {formatAmount(
-                        selectedPlan.amount
-                      )}
-
-                    </span>
-
-                  </div>
-
-
-                  {/* QR */}
-
-                  <div className="mx-auto mt-7 w-[270px] h-[270px] bg-white rounded-2xl p-4 flex items-center justify-center">
-
-                    <img
-
-                      src="/images/xfit-upi-qr.png"
-
-                      alt="X-FIT UPI Payment QR"
-
-                      className="w-full h-full object-contain"
-
-                    />
-
-                  </div>
-
-
-                  <p className="text-white/35 text-[10px] mt-5 tracking-[0.08em]">
-                    SCAN USING PHONEPE / GOOGLE PAY / PAYTM / BHIM
-                  </p>
-
-                </div>
-
-
-                {/* =================================================
-                    PAYMENT INSTRUCTIONS
-                ================================================= */}
-
-                <div className="flex flex-col justify-center">
-
-                  <p className="text-[9px] tracking-[0.3em] text-[#ccff00]">
-                    PAYMENT INSTRUCTIONS
-                  </p>
-
-
-                  <h3 className="text-2xl font-black mt-3">
-                    COMPLETE YOUR PAYMENT
-                  </h3>
-
-
-                  <div className="mt-7 space-y-5">
-
-                    <PaymentStep
-                      number="01"
-                      text="Scan the X-FIT UPI QR code."
-                    />
-
-                    <PaymentStep
-                      number="02"
-                      text={`Pay exactly ${formatAmount(
-                        selectedPlan.amount
-                      )}.`}
-                    />
-
-                    <PaymentStep
-                      number="03"
-                      text="Complete the transaction in your UPI app."
-                    />
-
-                    <PaymentStep
-                      number="04"
-                      text="Take a screenshot showing the successful payment."
-                    />
-
-                  </div>
-
-
-                  {/* =================================================
-                      SCREENSHOT UPLOAD
-                  ================================================= */}
-
-                  <div className="mt-8">
-
-                    <p className="text-[9px] tracking-[0.25em] text-[#ccff00]">
-                      PAYMENT VERIFICATION
-                    </p>
-
-
-                    <p className="text-xs text-white/45 mt-2">
-                      Upload a screenshot showing your completed UPI payment.
-                    </p>
-
-
-                    <label className="block mt-4 cursor-pointer">
-
-                      <div className="rounded-2xl border border-dashed border-white/15 bg-white/[0.02] p-5 hover:border-[#ccff00]/40 transition">
-
-                        <div className="text-center">
-
-                          <div className="text-2xl mb-2">
-                            ↑
-                          </div>
-
-
-                          <p className="text-[10px] font-bold tracking-[0.12em] text-white/60 break-all">
-
-                            {paymentScreenshot
-                              ? paymentScreenshot.name
-                              : "UPLOAD PAYMENT SCREENSHOT"}
-
-                          </p>
-
-
-                          <p className="text-[8px] text-white/25 mt-2">
-                            PNG / JPG / WEBP
-                          </p>
-
-                        </div>
-
-                      </div>
-
-
-                      <input
-
-                        type="file"
-
-                        accept="image/png,image/jpeg,image/webp"
-
-                        className="hidden"
-
-                        onChange={(event) => {
-
-                          const file =
-                            event.target.files?.[0];
-
-
-                          if (!file) {
-                            return;
-                          }
-
-
-                          if (
-                            ![
-                              "image/png",
-                              "image/jpeg",
-                              "image/webp"
-                            ].includes(file.type)
-                          ) {
-
-                            setError(
-                              "Please upload a PNG, JPG or WEBP image."
-                            );
-
-                            return;
-
-                          }
-
-
-                          // 5 MB limit
-
-                          if (
-                            file.size >
-                            5 * 1024 * 1024
-                          ) {
-
-                            setError(
-                              "Payment screenshot must be smaller than 5 MB."
-                            );
-
-                            return;
-
-                          }
-
-
-                          setError("");
-
-                          setPaymentScreenshot(
-                            file
-                          );
-
-                        }}
-
-                      />
-
-                    </label>
-
-
-                    {/* SELECTED FILE */}
-
-                    {paymentScreenshot && (
-
-                      <div className="mt-3 flex items-center justify-between gap-3">
-
-                        <p className="text-[9px] text-[#ccff00]">
-                          ✓ PAYMENT SCREENSHOT ATTACHED
-                        </p>
-
-
-                        <button
-
-                          type="button"
-
-                          onClick={() =>
-                            setPaymentScreenshot(
-                              null
-                            )
-                          }
-
-                          className="text-[8px] text-red-400 hover:text-red-300"
-                        >
-                          REMOVE
-                        </button>
-
-                      </div>
-
-                    )}
-
-                  </div>
-
-
-                  {/* =================================================
-                      WARNING
-                  ================================================= */}
-
-                  <div className="mt-8 rounded-2xl border border-yellow-400/15 bg-yellow-400/[0.03] p-5">
-
-                    <p className="text-yellow-400 text-[9px] tracking-[0.15em] font-black">
-                      IMPORTANT
-                    </p>
-
-
-                    <p className="text-white/40 text-xs leading-relaxed mt-2">
-
-                      Your membership will not activate
-                      immediately. X-FIT will verify the
-                      payment screenshot before activating
-                      your membership.
-
-                    </p>
-
-                  </div>
-
-
-                  {/* =================================================
-                      SUBMIT
-                  ================================================= */}
-
-                  <button
-
-                    onClick={
-                      submitUPIPayment
-                    }
-
-                    disabled={
-                      processing ||
-                      !paymentScreenshot
-                    }
-
-                    className="w-full mt-8 py-4 rounded-xl bg-[#ccff00] text-black font-black text-xs tracking-[0.15em] hover:shadow-[0_0_35px_rgba(204,255,0,0.25)] transition disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-
-                    {processing
-                      ? "SUBMITTING..."
-                      : "I HAVE PAID →"}
-
-                  </button>
-
-
-                  <button
-
-                    onClick={
-                      closePayment
-                    }
-
-                    disabled={
-                      processing
-                    }
-
-                    className="w-full mt-3 py-3 rounded-xl border border-white/10 text-white/40 text-[10px] tracking-[0.15em] hover:text-white transition"
-                  >
-
-                    CANCEL
-
-                  </button>
-
-                </div>
-
-              </div>
-
-            </motion.div>
-
-          </div>
-
-        )}
-
     </div>
-
   );
-
 }
 
+// ===========================================================
+// FEATURE COMPONENT
+// ===========================================================
 
-/* =========================================================
-   PAYMENT STEP
-========================================================= */
-
-function PaymentStep({
-  number,
-  text
-}) {
-
+function Feature({ text }) {
   return (
-
-    <div className="flex items-center gap-4">
-
-      <div className="w-9 h-9 rounded-xl border border-[#ccff00]/25 bg-[#ccff00]/[0.04] text-[#ccff00] flex items-center justify-center text-[9px] font-black flex-shrink-0">
-
-        {number}
-
-      </div>
-
-
-      <p className="text-white/50 text-xs leading-relaxed">
-        {text}
-      </p>
-
-    </div>
-
-  );
-
-}
-
-
-/* =========================================================
-   FEATURE
-========================================================= */
-
-function Feature({
-  text
-}) {
-
-  return (
-
     <div className="flex items-center gap-3">
 
       <span className="w-1.5 h-1.5 rounded-full bg-[#ccff00]" />
@@ -1498,10 +892,7 @@ function Feature({
       </span>
 
     </div>
-
   );
-
 }
-
 
 export default Membership;

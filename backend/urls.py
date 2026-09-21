@@ -47,10 +47,6 @@ from core.views import (
 )
 
 
-# ============================================================
-# X-FIT API HOME
-# ============================================================
-
 def api_home(request):
     return JsonResponse({
         "status": "online",
@@ -59,48 +55,29 @@ def api_home(request):
     })
 
 
-# ============================================================
-# URL PATTERNS
-# ============================================================
-
 urlpatterns = [
 
-    # --------------------------------------------------------
     # ADMIN
-    # --------------------------------------------------------
-
     path(
         "admin/",
         admin.site.urls
     ),
 
-
-    # --------------------------------------------------------
     # API HOME
-    # --------------------------------------------------------
-
     path(
         "api/",
         api_home,
         name="api-home"
     ),
 
-
-    # --------------------------------------------------------
     # TEST API
-    # --------------------------------------------------------
-
     path(
         "api/test/",
         test_api,
         name="test-api"
     ),
 
-
-    # ========================================================
     # AUTHENTICATION
-    # ========================================================
-
     path(
         "api/register/",
         RegisterView.as_view(),
@@ -119,33 +96,21 @@ urlpatterns = [
         name="refresh"
     ),
 
-
-    # ========================================================
     # PROFILE
-    # ========================================================
-
     path(
         "api/profile/",
         ProfileView.as_view(),
         name="profile"
     ),
 
-
-    # ========================================================
     # ASSESSMENT
-    # ========================================================
-
     path(
         "api/assessment/submit/",
         submit_assessment,
         name="assessment-submit"
     ),
 
-
-    # ========================================================
     # WORKOUT PLAN
-    # ========================================================
-
     path(
         "api/workouts/generate/",
         generate_workout_plan,
@@ -158,99 +123,63 @@ urlpatterns = [
         name="active-workout-plan"
     ),
 
-
-    # ========================================================
     # WORKOUT EXERCISE COMPLETION
-    # ========================================================
-
     path(
         "api/workouts/exercises/<int:exercise_id>/toggle/",
         toggle_workout_exercise,
         name="toggle-workout-exercise"
     ),
 
-
-    # ========================================================
     # WORKOUT STATISTICS
-    # ========================================================
-
     path(
         "api/workouts/stats/",
         workout_stats,
         name="workout-stats"
     ),
 
-
-    # ========================================================
     # MOTIONCHECK - SQUAT
-    # ========================================================
-
     path(
         "api/motioncheck/squat/analyze/",
         analyze_squat_video,
         name="motioncheck-squat-analyze"
     ),
 
-
-    # ========================================================
     # MOTIONCHECK - PUSHUP
-    # ========================================================
-
     path(
         "api/motioncheck/pushup/analyze/",
         analyze_pushup_video,
         name="motioncheck-pushup-analyze"
     ),
 
-
-    # ========================================================
     # MOTIONCHECK - BICEP CURL
-    # ========================================================
-
     path(
         "api/motioncheck/bicep-curl/analyze/",
         analyze_bicep_curl_video,
         name="motioncheck-bicep-curl-analyze"
     ),
 
-
-    # ========================================================
     # MOTIONCHECK HISTORY
-    # ========================================================
-
     path(
         "api/motioncheck/history/",
         motioncheck_history,
         name="motioncheck-history"
     ),
 
-
-    # ========================================================
     # PROGRESS DNA
-    # ========================================================
-
     path(
         "api/progress-dna/",
         progress_dna,
         name="progress-dna"
     ),
 
-
-    # ========================================================
     # SAFE MODE
-    # ========================================================
-
     path(
         "api/safe-mode/progress/",
         safe_mode_progress,
         name="safe-mode-progress"
     ),
 
-
-    # ========================================================
     # DIET PLAN
-    # ========================================================
-
     path(
         "api/diet/generate/",
         generate_diet_plan,
@@ -263,46 +192,26 @@ urlpatterns = [
         name="active-diet-plan"
     ),
 
-    # --------------------------------------------------------
     # COMPLETE DIET DAY
-    # --------------------------------------------------------
-
     path(
         "api/diet/complete-day/",
         complete_diet_day,
         name="complete-diet-day"
     ),
 
-
-    # ========================================================
     # NUTRITION AI CHAT
-    # ========================================================
-
     path(
         "api/nutrition/chat/",
         nutrition_chat,
         name="nutrition-chat"
     ),
 
-
-    # ========================================================
     # MEMBERSHIP
-    # ========================================================
-
-    # --------------------------------------------------------
-    # MEMBERSHIP PLANS
-    # --------------------------------------------------------
-
     path(
         "api/membership/plans/",
         membership_plans,
         name="membership-plans"
     ),
-
-
-    # --------------------------------------------------------
-    # CREATE RAZORPAY ORDER
-    # --------------------------------------------------------
 
     path(
         "api/membership/create-order/",
@@ -310,21 +219,11 @@ urlpatterns = [
         name="membership-create-order"
     ),
 
-
-    # --------------------------------------------------------
-    # VERIFY PAYMENT
-    # --------------------------------------------------------
-
     path(
         "api/membership/verify/",
         verify_membership_payment,
         name="membership-verify"
     ),
-
-
-    # --------------------------------------------------------
-    # MEMBERSHIP STATUS
-    # --------------------------------------------------------
 
     path(
         "api/membership/status/",
@@ -332,54 +231,25 @@ urlpatterns = [
         name="membership-status"
     ),
 
-
-    # --------------------------------------------------------
-    # MEMBERSHIP HISTORY
-    # --------------------------------------------------------
-
     path(
         "api/membership/history/",
         membership_history,
         name="membership-history"
     ),
 
-
-    # --------------------------------------------------------
     # SUBMIT UPI PAYMENT
-    # --------------------------------------------------------
-
     path(
-        "api/membership/submit-upi-payment/",
-        submit_upi_payment,
-        name="membership-submit-upi-payment"
-    ),
+    "api/membership/submit-upi/",
+    submit_upi_payment,
+    name="membership-submit-upi"
+),
 
-
-    # ========================================================
     # SHOP
-    # ========================================================
-
-    # --------------------------------------------------------
-    # CREATE SHOP ORDER
-    # --------------------------------------------------------
-    #
-    # FRONTEND MUST CALL:
-    # POST /api/shop/orders/
-    #
-    # NOT:
-    # /api/shop/orders/create/
-    #
-
     path(
         "api/shop/orders/",
         create_shop_order,
         name="create-shop-order"
     ),
-
-
-    # --------------------------------------------------------
-    # MY SHOP ORDERS
-    # --------------------------------------------------------
 
     path(
         "api/shop/orders/my/",
@@ -387,21 +257,11 @@ urlpatterns = [
         name="my-shop-orders"
     ),
 
-
-    # --------------------------------------------------------
-    # SHOP PRODUCTS
-    # --------------------------------------------------------
-
     path(
         "api/shop/products/",
         shop_products,
         name="shop-products"
     ),
-
-
-    # --------------------------------------------------------
-    # SHOP PRODUCT DETAIL
-    # --------------------------------------------------------
 
     path(
         "api/shop/products/<int:product_id>/",
@@ -410,10 +270,6 @@ urlpatterns = [
     ),
 ]
 
-
-# ============================================================
-# MEDIA FILES - DEVELOPMENT ONLY
-# ============================================================
 
 if settings.DEBUG:
     urlpatterns += static(
