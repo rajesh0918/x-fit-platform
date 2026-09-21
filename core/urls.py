@@ -165,7 +165,7 @@ path(
     name="nutrition-chat",
 ),
 path(
-    "api/diet/complete-day/",
+    "diet/complete-day/",
     complete_diet_day,
     name="complete-diet-day",
 ),
