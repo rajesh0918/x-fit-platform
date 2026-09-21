@@ -4,6 +4,7 @@ from rest_framework_simplejwt.views import (
     TokenObtainPairView,
     TokenRefreshView,
 )
+
 from .views import (
     test_api,
     RegisterView,
@@ -22,12 +23,12 @@ from .views import (
     generate_diet_plan,
     get_active_diet_plan,
     nutrition_chat,
-    complete_diet_day
-    
+    complete_diet_day,
 )
 
 
 urlpatterns = [
+
     # --------------------------------
     # TEST
     # --------------------------------
@@ -92,6 +93,24 @@ urlpatterns = [
     ),
 
     # --------------------------------
+    # WORKOUT EXERCISE TOGGLE
+    # --------------------------------
+    path(
+        "workouts/exercises/<int:exercise_id>/toggle/",
+        toggle_workout_exercise,
+        name="toggle-workout-exercise",
+    ),
+
+    # --------------------------------
+    # WORKOUT STATS
+    # --------------------------------
+    path(
+        "workouts/stats/",
+        workout_stats,
+        name="workout-stats",
+    ),
+
+    # --------------------------------
     # MOTIONCHECK - SQUAT
     # --------------------------------
     path(
@@ -126,47 +145,55 @@ urlpatterns = [
         motioncheck_history,
         name="motioncheck-history"
     ),
-    path(
-    "progress-dna/",
-    progress_dna,
-    name="progress-dna"
-),
-    path(
-    "safe-mode/progress/",
-    safe_mode_progress,
-    name="safe-mode-progress"
-),
-    path(
-    "workouts/exercises/<int:exercise_id>/toggle/",
-    toggle_workout_exercise,
-    name="toggle-workout-exercise",
-),
-    path(
-    "workouts/stats/",
-    workout_stats,
-    name="workout-stats",
-),
-    path(
-    "diet/generate/",
-    generate_diet_plan,
-    name="generate-diet-plan",
-),
 
-path(
-    "diet/active/",
-    get_active_diet_plan,
-    name="active-diet-plan",
-),
+    # --------------------------------
+    # PROGRESS DNA
+    # --------------------------------
+    path(
+        "progress-dna/",
+        progress_dna,
+        name="progress-dna"
+    ),
 
+    # --------------------------------
+    # SAFE MODE
+    # --------------------------------
+    path(
+        "safe-mode/progress/",
+        safe_mode_progress,
+        name="safe-mode-progress"
+    ),
 
-path(
-    "nutrition/chat/",
-    nutrition_chat,
-    name="nutrition-chat",
-),
-path(
-    "diet/complete-day/",
-    complete_diet_day,
-    name="complete-diet-day",
-),
+    # --------------------------------
+    # DIET PLAN
+    # --------------------------------
+    path(
+        "diet/generate/",
+        generate_diet_plan,
+        name="generate-diet-plan"
+    ),
+
+    path(
+        "diet/active/",
+        get_active_diet_plan,
+        name="active-diet-plan"
+    ),
+
+    # --------------------------------
+    # DIET DAY COMPLETION
+    # --------------------------------
+    path(
+        "diet/complete-day/",
+        complete_diet_day,
+        name="complete-diet-day"
+    ),
+
+    # --------------------------------
+    # NUTRITION AI CHAT
+    # --------------------------------
+    path(
+        "nutrition/chat/",
+        nutrition_chat,
+        name="nutrition-chat"
+    ),
 ]
