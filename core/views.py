@@ -2,7 +2,6 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 
 import os
-import tempfile
 import razorpay
 
 from datetime import timedelta
@@ -365,12 +364,8 @@ def generate_workout_plan(request):
     )
 
     if not assessment:
-
         return Response(
-            {
-                "error":
-                    "Complete the assessment first."
-            },
+            {"error": "Complete the assessment first."},
             status=status.HTTP_400_BAD_REQUEST
         )
 
@@ -378,10 +373,17 @@ def generate_workout_plan(request):
         user=user
     )
 
-    workout_days = (
-        profile.workout_days_per_week
-        or 3
-    )
+    try:
+        workout_days = int(
+            profile.workout_days_per_week
+            or assessment.days_per_week
+            or 3
+        )
+    except (ValueError, TypeError):
+        workout_days = 3
+
+    # Six training days is the maximum supported by this plan.
+    workout_days = min(max(workout_days, 1), 6)
 
     goal = (
         profile.fitness_goal
@@ -400,17 +402,11 @@ def generate_workout_plan(request):
     )
 
     if existing_plan:
-
         return Response(
             {
-                "message":
-                    "Active workout plan already exists.",
-
-                "plan_id":
-                    existing_plan.id,
-
-                "level":
-                    existing_plan.level,
+                "message": "Active workout plan already exists.",
+                "plan_id": existing_plan.id,
+                "level": existing_plan.level,
             },
             status=status.HTTP_200_OK
         )
@@ -419,267 +415,590 @@ def generate_workout_plan(request):
         user=user,
         level=level,
         fitness_goal=goal,
-
-        workout_days_per_week=
-            workout_days,
-
+        workout_days_per_week=workout_days,
         is_active=True,
     )
 
+    def exercise(
+        name,
+        sets,
+        reps,
+        rest,
+        equipment,
+        motioncheck=False
+    ):
+        return {
+            "name": name,
+            "sets": sets,
+            "reps": reps,
+            "rest": rest,
+            "equipment": equipment,
+            "motioncheck": motioncheck,
+        }
 
     # ==================================================
-    # STARTER
+    # STARTER PROGRAM
+    #
+    # First-time / beginner users:
+    # Week 1 -> machines + bodyweight foundation
+    # Week 2 -> basic dumbbell movements
+    # Week 3 -> controlled progression
+    # Week 4 -> beginner consolidation
     # ==================================================
 
-    starter_exercises = [
-        {
-            "name": "Bodyweight Squat",
-            "sets": 3,
-            "reps": 10,
-            "rest": 60,
-            "equipment": "Bodyweight",
-            "motioncheck": True,
-        },
-        {
-            "name": "Push-Up",
-            "sets": 3,
-            "reps": 8,
-            "rest": 60,
-            "equipment": "Bodyweight",
-            "motioncheck": True,
-        },
-        {
-            "name": "Bicep Curl",
-            "sets": 3,
-            "reps": 12,
-            "rest": 60,
-            "equipment": "Dumbbells",
-            "motioncheck": True,
-        },
-        {
-            "name": "Glute Bridge",
-            "sets": 3,
-            "reps": 12,
-            "rest": 45,
-            "equipment": "Bodyweight",
-            "motioncheck": False,
-        },
-    ]
+    starter_program = {
 
+        1: {
+            1: [
+                exercise("Bodyweight Squat", 3, 10, 60, "Bodyweight", True),
+                exercise("Machine Chest Press", 3, 10, 75, "Machine"),
+                exercise("Lat Pulldown", 3, 10, 75, "Cable Machine"),
+                exercise("Bicep Curl", 2, 12, 60, "Dumbbells", True),
+            ],
+            2: [
+                exercise("Leg Press", 3, 10, 75, "Machine"),
+                exercise("Seated Cable Row", 3, 10, 75, "Cable Machine"),
+                exercise("Machine Shoulder Press", 3, 10, 75, "Machine"),
+                exercise("Cable Tricep Pushdown", 2, 12, 60, "Cable Machine"),
+            ],
+            3: [
+                exercise("Bodyweight Squat", 3, 12, 60, "Bodyweight", True),
+                exercise("Incline Machine Press", 3, 10, 75, "Machine"),
+                exercise("Lat Pulldown", 3, 12, 75, "Cable Machine"),
+                exercise("Glute Bridge", 3, 12, 45, "Bodyweight"),
+            ],
+            4: [
+                exercise("Leg Extension", 3, 12, 60, "Machine"),
+                exercise("Seated Cable Row", 3, 12, 75, "Cable Machine"),
+                exercise("Dumbbell Lateral Raise", 3, 12, 45, "Dumbbells"),
+                exercise("Bicep Curl", 3, 10, 60, "Dumbbells", True),
+            ],
+            5: [
+                exercise("Leg Curl", 3, 12, 60, "Machine"),
+                exercise("Machine Chest Press", 3, 12, 75, "Machine"),
+                exercise("Lat Pulldown", 3, 10, 75, "Cable Machine"),
+                exercise("Cable Tricep Pushdown", 3, 12, 60, "Cable Machine"),
+            ],
+            6: [
+                exercise("Bodyweight Squat", 3, 12, 60, "Bodyweight", True),
+                exercise("Machine Shoulder Press", 3, 10, 75, "Machine"),
+                exercise("Seated Cable Row", 3, 10, 75, "Cable Machine"),
+                exercise("Glute Bridge", 3, 15, 45, "Bodyweight"),
+            ],
+        },
+
+        2: {
+            1: [
+                exercise("Goblet Squat", 3, 10, 75, "Dumbbell"),
+                exercise("Dumbbell Bench Press", 3, 10, 75, "Dumbbells"),
+                exercise("Lat Pulldown", 3, 12, 75, "Cable Machine"),
+                exercise("Hammer Curl", 3, 10, 60, "Dumbbells"),
+            ],
+            2: [
+                exercise("Leg Press", 4, 10, 90, "Machine"),
+                exercise("One-Arm Dumbbell Row", 3, 10, 75, "Dumbbell"),
+                exercise("Dumbbell Shoulder Press", 3, 10, 75, "Dumbbells"),
+                exercise("Rope Tricep Pushdown", 3, 12, 60, "Cable Machine"),
+            ],
+            3: [
+                exercise("Goblet Squat", 3, 12, 75, "Dumbbell"),
+                exercise("Incline Dumbbell Press", 3, 10, 75, "Dumbbells"),
+                exercise("Seated Cable Row", 3, 12, 75, "Cable Machine"),
+                exercise("Glute Bridge", 3, 15, 45, "Bodyweight"),
+            ],
+            4: [
+                exercise("Romanian Deadlift", 3, 10, 90, "Dumbbells"),
+                exercise("Dumbbell Bench Press", 3, 12, 75, "Dumbbells"),
+                exercise("Dumbbell Lateral Raise", 3, 15, 45, "Dumbbells"),
+                exercise("Hammer Curl", 3, 12, 60, "Dumbbells"),
+            ],
+            5: [
+                exercise("Walking Lunges", 3, 10, 75, "Dumbbells"),
+                exercise("Lat Pulldown", 3, 12, 75, "Cable Machine"),
+                exercise("Dumbbell Shoulder Press", 3, 10, 75, "Dumbbells"),
+                exercise("Rope Tricep Pushdown", 3, 12, 60, "Cable Machine"),
+            ],
+            6: [
+                exercise("Goblet Squat", 4, 10, 75, "Dumbbell"),
+                exercise("Incline Dumbbell Press", 3, 10, 75, "Dumbbells"),
+                exercise("One-Arm Dumbbell Row", 3, 12, 75, "Dumbbell"),
+                exercise("Hammer Curl", 3, 12, 60, "Dumbbells"),
+            ],
+        },
+
+        3: {
+            1: [
+                exercise("Goblet Squat", 4, 10, 75, "Dumbbell"),
+                exercise("Dumbbell Bench Press", 4, 10, 75, "Dumbbells"),
+                exercise("Lat Pulldown", 4, 10, 75, "Cable Machine"),
+                exercise("Bicep Curl", 3, 12, 60, "Dumbbells", True),
+            ],
+            2: [
+                exercise("Leg Press", 4, 12, 90, "Machine"),
+                exercise("One-Arm Dumbbell Row", 4, 10, 75, "Dumbbell"),
+                exercise("Dumbbell Shoulder Press", 4, 10, 75, "Dumbbells"),
+                exercise("Rope Tricep Pushdown", 3, 12, 60, "Cable Machine"),
+            ],
+            3: [
+                exercise("Romanian Deadlift", 4, 10, 90, "Dumbbells"),
+                exercise("Incline Dumbbell Press", 4, 10, 75, "Dumbbells"),
+                exercise("Seated Cable Row", 4, 10, 75, "Cable Machine"),
+                exercise("Glute Bridge", 4, 15, 45, "Bodyweight"),
+            ],
+            4: [
+                exercise("Walking Lunges", 4, 10, 75, "Dumbbells"),
+                exercise("Dumbbell Bench Press", 4, 10, 75, "Dumbbells"),
+                exercise("Dumbbell Lateral Raise", 3, 15, 45, "Dumbbells"),
+                exercise("Hammer Curl", 3, 12, 60, "Dumbbells"),
+            ],
+            5: [
+                exercise("Leg Press", 4, 12, 90, "Machine"),
+                exercise("Lat Pulldown", 4, 12, 75, "Cable Machine"),
+                exercise("Dumbbell Shoulder Press", 4, 10, 75, "Dumbbells"),
+                exercise("Rope Tricep Pushdown", 3, 15, 60, "Cable Machine"),
+            ],
+            6: [
+                exercise("Goblet Squat", 4, 12, 75, "Dumbbell"),
+                exercise("Incline Dumbbell Press", 4, 10, 75, "Dumbbells"),
+                exercise("One-Arm Dumbbell Row", 4, 12, 75, "Dumbbell"),
+                exercise("Bicep Curl", 3, 12, 60, "Dumbbells", True),
+            ],
+        },
+
+        4: {
+            1: [
+                exercise("Goblet Squat", 4, 12, 75, "Dumbbell"),
+                exercise("Dumbbell Bench Press", 4, 12, 75, "Dumbbells"),
+                exercise("Lat Pulldown", 4, 12, 75, "Cable Machine"),
+                exercise("Hammer Curl", 3, 12, 60, "Dumbbells"),
+            ],
+            2: [
+                exercise("Leg Press", 4, 12, 90, "Machine"),
+                exercise("Seated Cable Row", 4, 12, 75, "Cable Machine"),
+                exercise("Dumbbell Shoulder Press", 4, 12, 75, "Dumbbells"),
+                exercise("Rope Tricep Pushdown", 3, 15, 60, "Cable Machine"),
+            ],
+            3: [
+                exercise("Romanian Deadlift", 4, 12, 90, "Dumbbells"),
+                exercise("Incline Dumbbell Press", 4, 12, 75, "Dumbbells"),
+                exercise("One-Arm Dumbbell Row", 4, 12, 75, "Dumbbell"),
+                exercise("Glute Bridge", 4, 15, 45, "Bodyweight"),
+            ],
+            4: [
+                exercise("Walking Lunges", 4, 12, 75, "Dumbbells"),
+                exercise("Dumbbell Bench Press", 4, 12, 75, "Dumbbells"),
+                exercise("Dumbbell Lateral Raise", 4, 15, 45, "Dumbbells"),
+                exercise("Bicep Curl", 3, 12, 60, "Dumbbells", True),
+            ],
+            5: [
+                exercise("Leg Press", 4, 15, 90, "Machine"),
+                exercise("Lat Pulldown", 4, 12, 75, "Cable Machine"),
+                exercise("Dumbbell Shoulder Press", 4, 12, 75, "Dumbbells"),
+                exercise("Rope Tricep Pushdown", 3, 15, 60, "Cable Machine"),
+            ],
+            6: [
+                exercise("Goblet Squat", 4, 15, 75, "Dumbbell"),
+                exercise("Incline Dumbbell Press", 4, 12, 75, "Dumbbells"),
+                exercise("Seated Cable Row", 4, 12, 75, "Cable Machine"),
+                exercise("Hammer Curl", 3, 15, 60, "Dumbbells"),
+            ],
+        },
+    }
 
     # ==================================================
-    # BUILDER
+    # BUILDER PROGRAM
     # ==================================================
 
-    builder_exercises = [
-        {
-            "name": "Goblet Squat",
-            "sets": 4,
-            "reps": 10,
-            "rest": 75,
-            "equipment": "Dumbbell",
-            "motioncheck": True,
-        },
-        {
-            "name": "Push-Up",
-            "sets": 4,
-            "reps": 12,
-            "rest": 60,
-            "equipment": "Bodyweight",
-            "motioncheck": True,
-        },
-        {
-            "name": "Dumbbell Row",
-            "sets": 3,
-            "reps": 12,
-            "rest": 60,
-            "equipment": "Dumbbell",
-            "motioncheck": False,
-        },
-        {
-            "name": "Bicep Curl",
-            "sets": 3,
-            "reps": 12,
-            "rest": 60,
-            "equipment": "Dumbbells",
-            "motioncheck": True,
-        },
-    ]
+    builder_program = {
 
+        1: {
+            1: [
+                exercise("Barbell Back Squat", 4, 8, 120, "Barbell"),
+                exercise("Barbell Bench Press", 4, 8, 120, "Barbell"),
+                exercise("Lat Pulldown", 4, 10, 90, "Cable Machine"),
+                exercise("Bicep Curl", 3, 10, 60, "Dumbbells", True),
+            ],
+            2: [
+                exercise("Romanian Deadlift", 4, 8, 120, "Barbell"),
+                exercise("One-Arm Dumbbell Row", 4, 10, 75, "Dumbbell"),
+                exercise("Dumbbell Shoulder Press", 4, 10, 75, "Dumbbells"),
+                exercise("Rope Tricep Pushdown", 3, 12, 60, "Cable Machine"),
+            ],
+            3: [
+                exercise("Leg Press", 4, 10, 90, "Machine"),
+                exercise("Incline Dumbbell Press", 4, 10, 90, "Dumbbells"),
+                exercise("Seated Cable Row", 4, 10, 75, "Cable Machine"),
+                exercise("Hammer Curl", 3, 12, 60, "Dumbbells"),
+            ],
+            4: [
+                exercise("Barbell Hip Thrust", 4, 10, 90, "Barbell"),
+                exercise("Dumbbell Bench Press", 4, 10, 90, "Dumbbells"),
+                exercise("Lat Pulldown", 4, 10, 75, "Cable Machine"),
+                exercise("Dumbbell Lateral Raise", 3, 15, 45, "Dumbbells"),
+            ],
+            5: [
+                exercise("Bulgarian Split Squat", 3, 10, 90, "Dumbbells"),
+                exercise("Barbell Row", 4, 8, 120, "Barbell"),
+                exercise("Dumbbell Shoulder Press", 4, 10, 75, "Dumbbells"),
+                exercise("Rope Tricep Pushdown", 3, 12, 60, "Cable Machine"),
+            ],
+            6: [
+                exercise("Front-Foot Elevated Split Squat", 3, 10, 75, "Dumbbells"),
+                exercise("Incline Dumbbell Press", 4, 10, 90, "Dumbbells"),
+                exercise("Seated Cable Row", 4, 10, 75, "Cable Machine"),
+                exercise("Bicep Curl", 3, 12, 60, "Dumbbells", True),
+            ],
+        },
+
+        2: {
+            1: [
+                exercise("Barbell Back Squat", 4, 9, 120, "Barbell"),
+                exercise("Barbell Bench Press", 4, 9, 120, "Barbell"),
+                exercise("Lat Pulldown", 4, 11, 90, "Cable Machine"),
+                exercise("Bicep Curl", 3, 11, 60, "Dumbbells", True),
+            ],
+            2: [
+                exercise("Romanian Deadlift", 4, 9, 120, "Barbell"),
+                exercise("One-Arm Dumbbell Row", 4, 11, 75, "Dumbbell"),
+                exercise("Dumbbell Shoulder Press", 4, 11, 75, "Dumbbells"),
+                exercise("Rope Tricep Pushdown", 3, 13, 60, "Cable Machine"),
+            ],
+            3: [
+                exercise("Leg Press", 4, 11, 90, "Machine"),
+                exercise("Incline Dumbbell Press", 4, 11, 90, "Dumbbells"),
+                exercise("Seated Cable Row", 4, 11, 75, "Cable Machine"),
+                exercise("Hammer Curl", 3, 13, 60, "Dumbbells"),
+            ],
+            4: [
+                exercise("Barbell Hip Thrust", 4, 11, 90, "Barbell"),
+                exercise("Dumbbell Bench Press", 4, 11, 90, "Dumbbells"),
+                exercise("Lat Pulldown", 4, 11, 75, "Cable Machine"),
+                exercise("Dumbbell Lateral Raise", 3, 16, 45, "Dumbbells"),
+            ],
+            5: [
+                exercise("Bulgarian Split Squat", 3, 11, 90, "Dumbbells"),
+                exercise("Barbell Row", 4, 9, 120, "Barbell"),
+                exercise("Dumbbell Shoulder Press", 4, 11, 75, "Dumbbells"),
+                exercise("Rope Tricep Pushdown", 3, 13, 60, "Cable Machine"),
+            ],
+            6: [
+                exercise("Front-Foot Elevated Split Squat", 3, 11, 75, "Dumbbells"),
+                exercise("Incline Dumbbell Press", 4, 11, 90, "Dumbbells"),
+                exercise("Seated Cable Row", 4, 11, 75, "Cable Machine"),
+                exercise("Bicep Curl", 3, 13, 60, "Dumbbells", True),
+            ],
+        },
+
+        3: {
+            1: [
+                exercise("Barbell Back Squat", 5, 8, 120, "Barbell"),
+                exercise("Barbell Bench Press", 5, 8, 120, "Barbell"),
+                exercise("Lat Pulldown", 4, 12, 90, "Cable Machine"),
+                exercise("Bicep Curl", 4, 10, 60, "Dumbbells", True),
+            ],
+            2: [
+                exercise("Romanian Deadlift", 5, 8, 120, "Barbell"),
+                exercise("One-Arm Dumbbell Row", 4, 12, 75, "Dumbbell"),
+                exercise("Dumbbell Shoulder Press", 4, 12, 75, "Dumbbells"),
+                exercise("Rope Tricep Pushdown", 4, 12, 60, "Cable Machine"),
+            ],
+            3: [
+                exercise("Leg Press", 5, 10, 90, "Machine"),
+                exercise("Incline Dumbbell Press", 4, 12, 90, "Dumbbells"),
+                exercise("Seated Cable Row", 4, 12, 75, "Cable Machine"),
+                exercise("Hammer Curl", 4, 12, 60, "Dumbbells"),
+            ],
+            4: [
+                exercise("Barbell Hip Thrust", 5, 10, 90, "Barbell"),
+                exercise("Dumbbell Bench Press", 4, 12, 90, "Dumbbells"),
+                exercise("Lat Pulldown", 4, 12, 75, "Cable Machine"),
+                exercise("Dumbbell Lateral Raise", 4, 15, 45, "Dumbbells"),
+            ],
+            5: [
+                exercise("Bulgarian Split Squat", 4, 10, 90, "Dumbbells"),
+                exercise("Barbell Row", 5, 8, 120, "Barbell"),
+                exercise("Dumbbell Shoulder Press", 4, 12, 75, "Dumbbells"),
+                exercise("Rope Tricep Pushdown", 4, 15, 60, "Cable Machine"),
+            ],
+            6: [
+                exercise("Front-Foot Elevated Split Squat", 4, 10, 75, "Dumbbells"),
+                exercise("Incline Dumbbell Press", 4, 12, 90, "Dumbbells"),
+                exercise("Seated Cable Row", 4, 12, 75, "Cable Machine"),
+                exercise("Bicep Curl", 4, 12, 60, "Dumbbells", True),
+            ],
+        },
+
+        4: {
+            1: [
+                exercise("Barbell Back Squat", 5, 9, 120, "Barbell"),
+                exercise("Barbell Bench Press", 5, 9, 120, "Barbell"),
+                exercise("Lat Pulldown", 4, 12, 90, "Cable Machine"),
+                exercise("Bicep Curl", 4, 12, 60, "Dumbbells", True),
+            ],
+            2: [
+                exercise("Romanian Deadlift", 5, 9, 120, "Barbell"),
+                exercise("One-Arm Dumbbell Row", 4, 12, 75, "Dumbbell"),
+                exercise("Dumbbell Shoulder Press", 4, 12, 75, "Dumbbells"),
+                exercise("Rope Tricep Pushdown", 4, 15, 60, "Cable Machine"),
+            ],
+            3: [
+                exercise("Leg Press", 5, 12, 90, "Machine"),
+                exercise("Incline Dumbbell Press", 4, 12, 90, "Dumbbells"),
+                exercise("Seated Cable Row", 4, 12, 75, "Cable Machine"),
+                exercise("Hammer Curl", 4, 15, 60, "Dumbbells"),
+            ],
+            4: [
+                exercise("Barbell Hip Thrust", 5, 12, 90, "Barbell"),
+                exercise("Dumbbell Bench Press", 4, 12, 90, "Dumbbells"),
+                exercise("Lat Pulldown", 4, 12, 75, "Cable Machine"),
+                exercise("Dumbbell Lateral Raise", 4, 15, 45, "Dumbbells"),
+            ],
+            5: [
+                exercise("Bulgarian Split Squat", 4, 12, 90, "Dumbbells"),
+                exercise("Barbell Row", 5, 9, 120, "Barbell"),
+                exercise("Dumbbell Shoulder Press", 4, 12, 75, "Dumbbells"),
+                exercise("Rope Tricep Pushdown", 4, 15, 60, "Cable Machine"),
+            ],
+            6: [
+                exercise("Front-Foot Elevated Split Squat", 4, 12, 75, "Dumbbells"),
+                exercise("Incline Dumbbell Press", 4, 12, 90, "Dumbbells"),
+                exercise("Seated Cable Row", 4, 12, 75, "Cable Machine"),
+                exercise("Bicep Curl", 4, 15, 60, "Dumbbells", True),
+            ],
+        },
+    }
 
     # ==================================================
-    # ATHLETE
+    # ATHLETE PROGRAM
     # ==================================================
 
-    athlete_exercises = [
-        {
-            "name": "Barbell Squat",
-            "sets": 4,
-            "reps": 8,
-            "rest": 90,
-            "equipment": "Barbell",
-            "motioncheck": True,
+    athlete_program = {
+
+        1: {
+            1: [
+                exercise("Barbell Back Squat", 5, 6, 150, "Barbell"),
+                exercise("Barbell Bench Press", 5, 6, 150, "Barbell"),
+                exercise("Weighted Pull-Up", 4, 8, 120, "Pull-Up Bar"),
+                exercise("Barbell Curl", 4, 10, 75, "Barbell"),
+            ],
+            2: [
+                exercise("Deadlift", 4, 5, 180, "Barbell"),
+                exercise("Barbell Row", 4, 8, 120, "Barbell"),
+                exercise("Overhead Press", 4, 8, 120, "Barbell"),
+                exercise("Close-Grip Bench Press", 4, 8, 120, "Barbell"),
+            ],
+            3: [
+                exercise("Front Squat", 4, 8, 150, "Barbell"),
+                exercise("Incline Barbell Press", 4, 8, 120, "Barbell"),
+                exercise("Chest-Supported Row", 4, 10, 90, "Machine"),
+                exercise("Hammer Curl", 4, 10, 75, "Dumbbells"),
+            ],
+            4: [
+                exercise("Barbell Hip Thrust", 5, 8, 120, "Barbell"),
+                exercise("Dumbbell Bench Press", 4, 10, 90, "Dumbbells"),
+                exercise("Pull-Up", 4, 8, 120, "Pull-Up Bar"),
+                exercise("Dumbbell Lateral Raise", 4, 15, 45, "Dumbbells"),
+            ],
+            5: [
+                exercise("Bulgarian Split Squat", 4, 8, 120, "Dumbbells"),
+                exercise("Pendlay Row", 4, 8, 120, "Barbell"),
+                exercise("Push Press", 4, 6, 120, "Barbell"),
+                exercise("EZ-Bar Curl", 4, 10, 75, "EZ-Bar"),
+            ],
+            6: [
+                exercise("Romanian Deadlift", 4, 8, 120, "Barbell"),
+                exercise("Close-Grip Bench Press", 4, 8, 120, "Barbell"),
+                exercise("Weighted Chin-Up", 4, 8, 120, "Pull-Up Bar"),
+                exercise("Dumbbell Shoulder Press", 4, 10, 90, "Dumbbells"),
+            ],
         },
-        {
-            "name": "Push-Up",
-            "sets": 4,
-            "reps": 15,
-            "rest": 60,
-            "equipment": "Bodyweight",
-            "motioncheck": True,
+
+        2: {
+            1: [
+                exercise("Barbell Back Squat", 5, 7, 150, "Barbell"),
+                exercise("Barbell Bench Press", 5, 7, 150, "Barbell"),
+                exercise("Weighted Pull-Up", 4, 9, 120, "Pull-Up Bar"),
+                exercise("Barbell Curl", 4, 11, 75, "Barbell"),
+            ],
+            2: [
+                exercise("Deadlift", 4, 6, 180, "Barbell"),
+                exercise("Barbell Row", 4, 9, 120, "Barbell"),
+                exercise("Overhead Press", 4, 9, 120, "Barbell"),
+                exercise("Close-Grip Bench Press", 4, 9, 120, "Barbell"),
+            ],
+            3: [
+                exercise("Front Squat", 4, 9, 150, "Barbell"),
+                exercise("Incline Barbell Press", 4, 9, 120, "Barbell"),
+                exercise("Chest-Supported Row", 4, 11, 90, "Machine"),
+                exercise("Hammer Curl", 4, 11, 75, "Dumbbells"),
+            ],
+            4: [
+                exercise("Barbell Hip Thrust", 5, 9, 120, "Barbell"),
+                exercise("Dumbbell Bench Press", 4, 11, 90, "Dumbbells"),
+                exercise("Pull-Up", 4, 9, 120, "Pull-Up Bar"),
+                exercise("Dumbbell Lateral Raise", 4, 16, 45, "Dumbbells"),
+            ],
+            5: [
+                exercise("Bulgarian Split Squat", 4, 9, 120, "Dumbbells"),
+                exercise("Pendlay Row", 4, 9, 120, "Barbell"),
+                exercise("Push Press", 4, 7, 120, "Barbell"),
+                exercise("EZ-Bar Curl", 4, 11, 75, "EZ-Bar"),
+            ],
+            6: [
+                exercise("Romanian Deadlift", 4, 9, 120, "Barbell"),
+                exercise("Close-Grip Bench Press", 4, 9, 120, "Barbell"),
+                exercise("Weighted Chin-Up", 4, 9, 120, "Pull-Up Bar"),
+                exercise("Dumbbell Shoulder Press", 4, 11, 90, "Dumbbells"),
+            ],
         },
-        {
-            "name": "Barbell Row",
-            "sets": 4,
-            "reps": 10,
-            "rest": 90,
-            "equipment": "Barbell",
-            "motioncheck": False,
+
+        3: {
+            1: [
+                exercise("Barbell Back Squat", 5, 8, 150, "Barbell"),
+                exercise("Barbell Bench Press", 5, 8, 150, "Barbell"),
+                exercise("Weighted Pull-Up", 5, 8, 120, "Pull-Up Bar"),
+                exercise("Barbell Curl", 4, 12, 75, "Barbell"),
+            ],
+            2: [
+                exercise("Deadlift", 5, 5, 180, "Barbell"),
+                exercise("Barbell Row", 5, 8, 120, "Barbell"),
+                exercise("Overhead Press", 5, 8, 120, "Barbell"),
+                exercise("Close-Grip Bench Press", 4, 10, 120, "Barbell"),
+            ],
+            3: [
+                exercise("Front Squat", 5, 8, 150, "Barbell"),
+                exercise("Incline Barbell Press", 5, 8, 120, "Barbell"),
+                exercise("Chest-Supported Row", 5, 10, 90, "Machine"),
+                exercise("Hammer Curl", 4, 12, 75, "Dumbbells"),
+            ],
+            4: [
+                exercise("Barbell Hip Thrust", 5, 10, 120, "Barbell"),
+                exercise("Dumbbell Bench Press", 5, 10, 90, "Dumbbells"),
+                exercise("Pull-Up", 5, 8, 120, "Pull-Up Bar"),
+                exercise("Dumbbell Lateral Raise", 4, 15, 45, "Dumbbells"),
+            ],
+            5: [
+                exercise("Bulgarian Split Squat", 5, 10, 120, "Dumbbells"),
+                exercise("Pendlay Row", 5, 8, 120, "Barbell"),
+                exercise("Push Press", 5, 6, 120, "Barbell"),
+                exercise("EZ-Bar Curl", 4, 12, 75, "EZ-Bar"),
+            ],
+            6: [
+                exercise("Romanian Deadlift", 5, 8, 120, "Barbell"),
+                exercise("Close-Grip Bench Press", 5, 8, 120, "Barbell"),
+                exercise("Weighted Chin-Up", 5, 8, 120, "Pull-Up Bar"),
+                exercise("Dumbbell Shoulder Press", 4, 12, 90, "Dumbbells"),
+            ],
         },
-        {
-            "name": "Bicep Curl",
-            "sets": 4,
-            "reps": 12,
-            "rest": 60,
-            "equipment": "Dumbbells",
-            "motioncheck": True,
+
+        4: {
+            1: [
+                exercise("Barbell Back Squat", 5, 8, 150, "Barbell"),
+                exercise("Barbell Bench Press", 5, 8, 150, "Barbell"),
+                exercise("Weighted Pull-Up", 5, 10, 120, "Pull-Up Bar"),
+                exercise("Barbell Curl", 4, 12, 75, "Barbell"),
+            ],
+            2: [
+                exercise("Deadlift", 5, 6, 180, "Barbell"),
+                exercise("Barbell Row", 5, 10, 120, "Barbell"),
+                exercise("Overhead Press", 5, 10, 120, "Barbell"),
+                exercise("Close-Grip Bench Press", 4, 12, 120, "Barbell"),
+            ],
+            3: [
+                exercise("Front Squat", 5, 10, 150, "Barbell"),
+                exercise("Incline Barbell Press", 5, 10, 120, "Barbell"),
+                exercise("Chest-Supported Row", 5, 12, 90, "Machine"),
+                exercise("Hammer Curl", 4, 15, 75, "Dumbbells"),
+            ],
+            4: [
+                exercise("Barbell Hip Thrust", 5, 10, 120, "Barbell"),
+                exercise("Dumbbell Bench Press", 5, 12, 90, "Dumbbells"),
+                exercise("Pull-Up", 5, 10, 120, "Pull-Up Bar"),
+                exercise("Dumbbell Lateral Raise", 4, 15, 45, "Dumbbells"),
+            ],
+            5: [
+                exercise("Bulgarian Split Squat", 5, 10, 120, "Dumbbells"),
+                exercise("Pendlay Row", 5, 10, 120, "Barbell"),
+                exercise("Push Press", 5, 8, 120, "Barbell"),
+                exercise("EZ-Bar Curl", 4, 15, 75, "EZ-Bar"),
+            ],
+            6: [
+                exercise("Romanian Deadlift", 5, 10, 120, "Barbell"),
+                exercise("Close-Grip Bench Press", 5, 10, 120, "Barbell"),
+                exercise("Weighted Chin-Up", 5, 10, 120, "Pull-Up Bar"),
+                exercise("Dumbbell Shoulder Press", 4, 12, 90, "Dumbbells"),
+            ],
         },
-    ]
+    }
 
     if level == "Athlete":
-
-        exercise_template = (
-            athlete_exercises
-        )
-
+        program = athlete_program
     elif level == "Builder":
-
-        exercise_template = (
-            builder_exercises
-        )
-
+        program = builder_program
     else:
-
-        exercise_template = (
-            starter_exercises
-        )
+        program = starter_program
 
     week_themes = {
-        1: "Technique & Baseline",
-        2: "Consistency",
-        3: "Progression",
+        1: "Foundation & Technique",
+        2: "Progressive Overload",
+        3: "Strength & Volume",
         4: "Consolidation",
     }
 
-    training_days_per_week = min(
-        max(
-            workout_days,
-            1
-        ),
-        6
-    )
-
     for week in range(1, 5):
 
-        for day in range(1, 8):
+        for day in range(1, 7):
 
-            is_training_day = (
-                day <=
-                training_days_per_week
-            )
+            if day <= workout_days:
 
-            if is_training_day:
-
-                workout_day = (
-                    WorkoutDay.objects.create(
-                        plan=plan,
-
-                        week_number=
-                            week,
-
-                        day_number=
-                            day,
-
-                        title=
-                            f"Training Day {day}",
-
-                        theme=
-                            week_themes[week],
-
-                        is_rest_day=False,
-                    )
+                workout_day = WorkoutDay.objects.create(
+                    plan=plan,
+                    week_number=week,
+                    day_number=day,
+                    title=f"Day {day} - {week_themes[week]}",
+                    theme=week_themes[week],
+                    is_rest_day=False,
                 )
 
-                for exercise in exercise_template:
+                exercises_for_day = program[week][day]
 
-                    sets = exercise["sets"]
-                    reps = exercise["reps"]
-
-                    if week == 2:
-                        reps += 1
-
-                    elif week == 3:
-                        reps += 2
+                for item in exercises_for_day:
 
                     WorkoutExercise.objects.create(
-                        workout_day=
-                            workout_day,
-
-                        name=
-                            exercise["name"],
-
-                        sets=
-                            sets,
-
-                        reps=
-                            reps,
-
-                        rest_seconds=
-                            exercise["rest"],
-
-                        equipment=
-                            exercise["equipment"],
-
-                        motioncheck_supported=
-                            exercise["motioncheck"],
+                        workout_day=workout_day,
+                        name=item["name"],
+                        sets=item["sets"],
+                        reps=item["reps"],
+                        rest_seconds=item["rest"],
+                        equipment=item["equipment"],
+                        motioncheck_supported=item["motioncheck"],
                     )
 
             else:
 
                 WorkoutDay.objects.create(
                     plan=plan,
-
-                    week_number=
-                        week,
-
-                    day_number=
-                        day,
-
-                    title=
-                        "Recovery Day",
-
-                    theme=
-                        week_themes[week],
-
+                    week_number=week,
+                    day_number=day,
+                    title="Recovery / Rest Day",
+                    theme=week_themes[week],
                     is_rest_day=True,
                 )
 
     return Response(
         {
-            "message":
-                "4-week workout plan generated successfully.",
-
-            "plan_id":
-                plan.id,
-
-            "level":
-                level,
-
-            "fitness_goal":
-                goal,
-
-            "workout_days_per_week":
-                workout_days,
+            "message": "4-week progressive workout plan generated successfully.",
+            "plan_id": plan.id,
+            "level": level,
+            "fitness_goal": goal,
+            "workout_days_per_week": workout_days,
+            "weeks": 4,
+            "progression": {
+                "week_1": "Foundation & technique",
+                "week_2": "Progressive overload",
+                "week_3": "Strength & volume",
+                "week_4": "Consolidation",
+            },
         },
         status=status.HTTP_201_CREATED
     )
@@ -1058,78 +1377,87 @@ def workout_stats(request):
 @permission_classes([IsAuthenticated])
 def analyze_squat_video(request):
 
-    video_file = request.FILES.get("video")
+    video_file = request.FILES.get(
+        "video"
+    )
 
     if not video_file:
-        return Response(
-            {"error": "Video file is required."},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-
-    temp_path = None
-    analysis = None
-
-    try:
-        suffix = os.path.splitext(video_file.name)[1] or ".mp4"
-
-        with tempfile.NamedTemporaryFile(
-            delete=False,
-            suffix=suffix,
-            dir="/tmp"
-        ) as temp_file:
-            for chunk in video_file.chunks():
-                temp_file.write(chunk)
-
-            temp_path = temp_file.name
-
-        result = process_squat_video(temp_path)
-
-        analysis = MotionCheckAnalysis.objects.create(
-            user=request.user,
-            exercise="squat",
-            rep_count=result["rep_count"],
-            form_score=result["form_score"],
-            feedback=result["feedback"],
-            metric_breakdown={
-                "rep_angles": result["rep_angles"],
-                "rep_quality": result["rep_quality"],
-                "processed_frames": result["processed_frames"],
-                "skipped_frames": result["skipped_frames"],
-            }
-        )
-
-        serializer = MotionCheckAnalysisSerializer(
-            analysis,
-            context={"request": request}
-        )
-
-        return Response(
-            serializer.data,
-            status=status.HTTP_201_CREATED
-        )
-
-    except Exception as error:
-        print("========================================")
-        print("SQUAT ANALYSIS ERROR:", repr(error))
-        print("========================================")
-
-        if analysis:
-            analysis.delete()
 
         return Response(
             {
-                "error": "Video analysis failed.",
-                "details": str(error),
+                "error":
+                    "Video file is required."
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    analysis = MotionCheckAnalysis.objects.create(
+        user=request.user,
+        exercise="squat",
+        video=video_file,
+    )
+
+    try:
+
+        result = process_squat_video(
+            analysis.video.path
+        )
+
+        analysis.rep_count = (
+            result["rep_count"]
+        )
+
+        analysis.form_score = (
+            result["form_score"]
+        )
+
+        analysis.feedback = (
+            result["feedback"]
+        )
+
+        analysis.metric_breakdown = {
+            "rep_angles":
+                result["rep_angles"],
+
+            "rep_quality":
+                result["rep_quality"],
+
+            "processed_frames":
+                result["processed_frames"],
+
+            "skipped_frames":
+                result["skipped_frames"],
+        }
+
+        analysis.save()
+
+    except Exception as error:
+
+        analysis.delete()
+
+        return Response(
+            {
+                "error":
+                    "Video analysis failed.",
+
+                "details":
+                    str(error),
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
-    finally:
-        if temp_path and os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-            except Exception:
-                pass
+    serializer = MotionCheckAnalysisSerializer(
+        analysis,
+
+        context={
+            "request": request
+        }
+    )
+
+    return Response(
+        serializer.data,
+        status=status.HTTP_201_CREATED
+    )
 
 
 # ==================================================
@@ -1140,78 +1468,87 @@ def analyze_squat_video(request):
 @permission_classes([IsAuthenticated])
 def analyze_pushup_video(request):
 
-    video_file = request.FILES.get("video")
+    video_file = request.FILES.get(
+        "video"
+    )
 
     if not video_file:
-        return Response(
-            {"error": "Video file is required."},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-
-    temp_path = None
-    analysis = None
-
-    try:
-        suffix = os.path.splitext(video_file.name)[1] or ".mp4"
-
-        with tempfile.NamedTemporaryFile(
-            delete=False,
-            suffix=suffix,
-            dir="/tmp"
-        ) as temp_file:
-            for chunk in video_file.chunks():
-                temp_file.write(chunk)
-
-            temp_path = temp_file.name
-
-        result = process_pushup_video(temp_path)
-
-        analysis = MotionCheckAnalysis.objects.create(
-            user=request.user,
-            exercise="pushup",
-            rep_count=result["rep_count"],
-            form_score=result["form_score"],
-            feedback=result["feedback"],
-            metric_breakdown={
-                "rep_angles": result["rep_angles"],
-                "rep_quality": result["rep_quality"],
-                "processed_frames": result["processed_frames"],
-                "skipped_frames": result["skipped_frames"],
-            }
-        )
-
-        serializer = MotionCheckAnalysisSerializer(
-            analysis,
-            context={"request": request}
-        )
-
-        return Response(
-            serializer.data,
-            status=status.HTTP_201_CREATED
-        )
-
-    except Exception as error:
-        print("========================================")
-        print("PUSH-UP ANALYSIS ERROR:", repr(error))
-        print("========================================")
-
-        if analysis:
-            analysis.delete()
 
         return Response(
             {
-                "error": "Push-Up analysis failed.",
-                "details": str(error),
+                "error":
+                    "Video file is required."
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    analysis = MotionCheckAnalysis.objects.create(
+        user=request.user,
+        exercise="pushup",
+        video=video_file,
+    )
+
+    try:
+
+        result = process_pushup_video(
+            analysis.video.path
+        )
+
+        analysis.rep_count = (
+            result["rep_count"]
+        )
+
+        analysis.form_score = (
+            result["form_score"]
+        )
+
+        analysis.feedback = (
+            result["feedback"]
+        )
+
+        analysis.metric_breakdown = {
+            "rep_angles":
+                result["rep_angles"],
+
+            "rep_quality":
+                result["rep_quality"],
+
+            "processed_frames":
+                result["processed_frames"],
+
+            "skipped_frames":
+                result["skipped_frames"],
+        }
+
+        analysis.save()
+
+    except Exception as error:
+
+        analysis.delete()
+
+        return Response(
+            {
+                "error":
+                    "Push-Up analysis failed.",
+
+                "details":
+                    str(error),
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
-    finally:
-        if temp_path and os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-            except Exception:
-                pass
+    serializer = MotionCheckAnalysisSerializer(
+        analysis,
+
+        context={
+            "request": request
+        }
+    )
+
+    return Response(
+        serializer.data,
+        status=status.HTTP_201_CREATED
+    )
 
 
 # ==================================================
@@ -1222,80 +1559,98 @@ def analyze_pushup_video(request):
 @permission_classes([IsAuthenticated])
 def analyze_bicep_curl_video(request):
 
-    video_file = request.FILES.get("video")
+    video_file = request.FILES.get(
+        "video"
+    )
 
     if not video_file:
-        return Response(
-            {"error": "Video file is required."},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-
-    temp_path = None
-    analysis = None
-
-    try:
-        suffix = os.path.splitext(video_file.name)[1] or ".mp4"
-
-        with tempfile.NamedTemporaryFile(
-            delete=False,
-            suffix=suffix,
-            dir="/tmp"
-        ) as temp_file:
-            for chunk in video_file.chunks():
-                temp_file.write(chunk)
-
-            temp_path = temp_file.name
-
-        result = process_bicep_curl_video(temp_path)
-
-        analysis = MotionCheckAnalysis.objects.create(
-            user=request.user,
-            exercise="bicep_curl",
-            rep_count=result["rep_count"],
-            form_score=result["form_score"],
-            feedback=result["feedback"],
-            metric_breakdown={
-                "selected_arm": result.get("selected_arm"),
-                "arm_detection": result.get("arm_detection", {}),
-                "rep_data": result["rep_data"],
-                "rep_quality": result["rep_quality"],
-                "processed_frames": result["processed_frames"],
-                "skipped_frames": result["skipped_frames"],
-            }
-        )
-
-        serializer = MotionCheckAnalysisSerializer(
-            analysis,
-            context={"request": request}
-        )
-
-        return Response(
-            serializer.data,
-            status=status.HTTP_201_CREATED
-        )
-
-    except Exception as error:
-        print("========================================")
-        print("BICEP CURL ANALYSIS ERROR:", repr(error))
-        print("========================================")
-
-        if analysis:
-            analysis.delete()
 
         return Response(
             {
-                "error": "Bicep Curl analysis failed.",
-                "details": str(error),
+                "error":
+                    "Video file is required."
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    analysis = MotionCheckAnalysis.objects.create(
+        user=request.user,
+        exercise="bicep_curl",
+        video=video_file,
+    )
+
+    try:
+
+        result = process_bicep_curl_video(
+            analysis.video.path
+        )
+
+        analysis.rep_count = (
+            result["rep_count"]
+        )
+
+        analysis.form_score = (
+            result["form_score"]
+        )
+
+        analysis.feedback = (
+            result["feedback"]
+        )
+
+        analysis.metric_breakdown = {
+            "selected_arm":
+                result.get(
+                    "selected_arm"
+                ),
+
+            "arm_detection":
+                result.get(
+                    "arm_detection",
+                    {}
+                ),
+
+            "rep_data":
+                result["rep_data"],
+
+            "rep_quality":
+                result["rep_quality"],
+
+            "processed_frames":
+                result["processed_frames"],
+
+            "skipped_frames":
+                result["skipped_frames"],
+        }
+
+        analysis.save()
+
+    except Exception as error:
+
+        analysis.delete()
+
+        return Response(
+            {
+                "error":
+                    "Bicep Curl analysis failed.",
+
+                "details":
+                    str(error),
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
-    finally:
-        if temp_path and os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-            except Exception:
-                pass
+    serializer = MotionCheckAnalysisSerializer(
+        analysis,
+
+        context={
+            "request": request
+        }
+    )
+
+    return Response(
+        serializer.data,
+        status=status.HTTP_201_CREATED
+    )
 
 
 # ==================================================
