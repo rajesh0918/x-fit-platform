@@ -8,6 +8,7 @@ from datetime import timedelta
 import json
 import urllib.request
 import urllib.error
+import tempfile
 
 from rest_framework import generics, status
 from rest_framework.decorators import api_view, permission_classes
@@ -1453,16 +1454,25 @@ def analyze_squat_video(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    analysis = MotionCheckAnalysis.objects.create(
-        user=request.user,
-        exercise="squat",
-        video=video_file,
-    )
+    temp_path = None
 
     try:
+        suffix = os.path.splitext(video_file.name)[1] or ".mp4"
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=suffix
+        ) as temp_file:
+            for chunk in video_file.chunks():
+                temp_file.write(chunk)
+            temp_path = temp_file.name
+
+        analysis = MotionCheckAnalysis.objects.create(
+            user=request.user,
+            exercise="squat",
+        )
 
         result = process_squat_video(
-            analysis.video.path
+            temp_path
         )
 
         analysis.rep_count = (
@@ -1495,7 +1505,8 @@ def analyze_squat_video(request):
 
     except Exception as error:
 
-        analysis.delete()
+        if "analysis" in locals():
+            analysis.delete()
 
         return Response(
             {
@@ -1507,6 +1518,9 @@ def analyze_squat_video(request):
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
 
     serializer = MotionCheckAnalysisSerializer(
         analysis,
@@ -1544,16 +1558,25 @@ def analyze_pushup_video(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    analysis = MotionCheckAnalysis.objects.create(
-        user=request.user,
-        exercise="pushup",
-        video=video_file,
-    )
+    temp_path = None
 
     try:
+        suffix = os.path.splitext(video_file.name)[1] or ".mp4"
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=suffix
+        ) as temp_file:
+            for chunk in video_file.chunks():
+                temp_file.write(chunk)
+            temp_path = temp_file.name
+
+        analysis = MotionCheckAnalysis.objects.create(
+            user=request.user,
+            exercise="pushup",
+        )
 
         result = process_pushup_video(
-            analysis.video.path
+            temp_path
         )
 
         analysis.rep_count = (
@@ -1586,7 +1609,8 @@ def analyze_pushup_video(request):
 
     except Exception as error:
 
-        analysis.delete()
+        if "analysis" in locals():
+            analysis.delete()
 
         return Response(
             {
@@ -1598,6 +1622,9 @@ def analyze_pushup_video(request):
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
 
     serializer = MotionCheckAnalysisSerializer(
         analysis,
@@ -1635,16 +1662,25 @@ def analyze_bicep_curl_video(request):
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    analysis = MotionCheckAnalysis.objects.create(
-        user=request.user,
-        exercise="bicep_curl",
-        video=video_file,
-    )
+    temp_path = None
 
     try:
+        suffix = os.path.splitext(video_file.name)[1] or ".mp4"
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=suffix
+        ) as temp_file:
+            for chunk in video_file.chunks():
+                temp_file.write(chunk)
+            temp_path = temp_file.name
+
+        analysis = MotionCheckAnalysis.objects.create(
+            user=request.user,
+            exercise="bicep_curl",
+        )
 
         result = process_bicep_curl_video(
-            analysis.video.path
+            temp_path
         )
 
         analysis.rep_count = (
@@ -1688,7 +1724,8 @@ def analyze_bicep_curl_video(request):
 
     except Exception as error:
 
-        analysis.delete()
+        if "analysis" in locals():
+            analysis.delete()
 
         return Response(
             {
@@ -1700,6 +1737,9 @@ def analyze_bicep_curl_video(request):
             },
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
 
     serializer = MotionCheckAnalysisSerializer(
         analysis,
