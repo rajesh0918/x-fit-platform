@@ -22,6 +22,7 @@ from .views import (
     generate_diet_plan,
     get_active_diet_plan,
     nutrition_chat,
+    complete_diet_day
     
 )
 
@@ -162,5 +163,10 @@ path(
     "nutrition/chat/",
     nutrition_chat,
     name="nutrition-chat",
+),
+path(
+    "api/diet/complete-day/",
+    complete_diet_day,
+    name="complete-diet-day",
 ),
 ]
