@@ -15,6 +15,7 @@ function Membership() {
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [selectedPlan, setSelectedPlan] = useState(null);
 
   useEffect(() => {
     loadMembershipData();
@@ -79,7 +80,91 @@ function Membership() {
   };
 
   // =========================================================
-  // UPI PAYMENT SUBMISSION
+  // UPI PAYMENT CONFIGURATION
+  // =========================================================
+
+  const upiId = import.meta.env.VITE_XFIT_UPI_ID || "";
+  const customQrUrl =
+    import.meta.env.VITE_XFIT_UPI_QR_URL || "";
+
+  const getPlanKey = (plan) =>
+    plan?.plan || plan?.id || plan?.name || "";
+
+  // X-FIT PRICES
+  // Monthly     = ₹100
+  // Half-Yearly = ₹400
+  // Yearly      = ₹700
+  const getPaymentAmount = (plan) => {
+    const key = String(getPlanKey(plan)).toLowerCase();
+
+    if (key === "monthly") return 100;
+
+    if (
+      key === "quarterly" ||
+      key === "half-yearly" ||
+      key === "half_yearly" ||
+      key === "halfyearly"
+    ) {
+      return 400;
+    }
+
+    if (key === "yearly") return 700;
+
+    return Number(plan?.amount || 0);
+  };
+
+  const getUpiLink = (plan) => {
+    if (!upiId) return "";
+
+    const amount = getPaymentAmount(plan);
+
+    const name = encodeURIComponent(
+      "X-FIT Membership"
+    );
+
+    return (
+      `upi://pay?pa=${encodeURIComponent(upiId)}` +
+      `&pn=${name}` +
+      `&am=${amount}` +
+      "&cu=INR"
+    );
+  };
+
+  const getQrUrl = (plan) => {
+    // If you have uploaded your own QR image,
+    // VITE_XFIT_UPI_QR_URL will be used.
+    if (customQrUrl) {
+      return customQrUrl;
+    }
+
+    const upiLink = getUpiLink(plan);
+
+    if (!upiLink) {
+      return "";
+    }
+
+    // Dynamic QR generation
+    return (
+      "https://api.qrserver.com/v1/create-qr-code/" +
+      "?size=260x260&data=" +
+      encodeURIComponent(upiLink)
+    );
+  };
+
+  // =========================================================
+  // OPEN PAYMENT MODAL
+  // =========================================================
+
+  const openPayment = (plan) => {
+    if (isFreeTrial) return;
+
+    setError("");
+    setMessage("");
+    setSelectedPlan(plan);
+  };
+
+  // =========================================================
+  // SUBMIT UPI PAYMENT FOR MANUAL VERIFICATION
   // =========================================================
 
   const startPayment = async (plan) => {
@@ -98,7 +183,10 @@ function Membership() {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            plan: plan.plan || plan.id || plan.name,
+            plan:
+              plan.plan ||
+              plan.id ||
+              plan.name,
           }),
         }
       );
@@ -124,6 +212,8 @@ function Membership() {
         } IS AWAITING VERIFICATION.`
       );
 
+      setSelectedPlan(null);
+
       setProcessing(false);
 
       await loadMembershipData();
@@ -143,15 +233,20 @@ function Membership() {
   };
 
   // =========================================================
-  // FORMAT PLAN NAME
+  // FORMATTING
   // =========================================================
 
   const formatPlanName = (plan) => {
     if (!plan) return "Membership";
 
-    const normalized = String(plan).toLowerCase();
+    const normalized =
+      String(plan).toLowerCase();
 
-    if (normalized === "quarterly") {
+    if (
+      normalized === "quarterly" ||
+      normalized === "half-yearly" ||
+      normalized === "half_yearly"
+    ) {
       return "Half-Yearly";
     }
 
@@ -165,19 +260,11 @@ function Membership() {
     );
   };
 
-  // =========================================================
-  // FORMAT PRICE
-  // =========================================================
-
   const formatAmount = (amount) => {
     const value = Number(amount || 0);
 
     return `₹${value.toLocaleString("en-IN")}`;
   };
-
-  // =========================================================
-  // PLAN DURATION
-  // =========================================================
 
   const getDuration = (plan) => {
     const name = String(
@@ -223,9 +310,12 @@ function Membership() {
   const trialExpired =
     status?.trial_expired === true;
 
+  // =========================================================
+  // UI
+  // =========================================================
+
   return (
     <div className="relative min-h-screen bg-black text-white overflow-x-hidden">
-
       <CinematicBackground />
 
       {/* =====================================================
@@ -233,28 +323,20 @@ function Membership() {
       ====================================================== */}
 
       <nav className="fixed top-0 left-0 right-0 z-50 px-5 md:px-10 py-5">
-
         <div className="max-w-[1500px] mx-auto">
-
           <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-black/55 backdrop-blur-xl px-5 py-3">
-
-            {/* LOGO */}
 
             <button
               onClick={() => navigate("/")}
               className="flex items-center gap-3"
             >
-
               <div className="w-9 h-9 rounded-lg border border-[#ccff00]/40 bg-[#ccff00]/10 flex items-center justify-center">
-
                 <span className="text-[#ccff00] font-black">
                   X
                 </span>
-
               </div>
 
               <div>
-
                 <p className="font-black tracking-[0.25em] text-sm">
                   X-FIT
                 </p>
@@ -262,12 +344,8 @@ function Membership() {
                 <p className="text-[7px] tracking-[0.2em] text-white/30">
                   ATHLETE PERFORMANCE SYSTEM
                 </p>
-
               </div>
-
             </button>
-
-            {/* DESKTOP NAV */}
 
             <div className="hidden md:flex items-center gap-7 text-[10px] tracking-[0.16em]">
 
@@ -309,10 +387,7 @@ function Membership() {
               <button className="text-[#ccff00]">
                 MEMBERSHIP
               </button>
-
             </div>
-
-            {/* PROFILE */}
 
             <button
               onClick={() => navigate("/profile")}
@@ -324,9 +399,7 @@ function Membership() {
             </button>
 
           </div>
-
         </div>
-
       </nav>
 
       {/* =====================================================
@@ -354,34 +427,28 @@ function Membership() {
             </div>
 
             <h1 className="text-5xl md:text-7xl font-black tracking-[-0.05em] leading-none">
-
               ACCESS
-
               <br />
 
               <span className="text-[#ccff00]">
                 THE SYSTEM.
               </span>
-
             </h1>
 
             <p className="max-w-2xl mt-6 text-sm md:text-base text-white/45 leading-relaxed">
-
               Activate your X-FIT performance protocol.
               Training, nutrition, MotionCheck and
               performance intelligence in one athlete
               operating system.
-
             </p>
 
           </div>
 
           {/* =================================================
-              FREE TRIAL / MEMBERSHIP STATUS
+              ACTIVE MEMBERSHIP / FREE TRIAL
           ================================================== */}
 
           {isActive && (
-
             <motion.div
               initial={{
                 opacity: 0,
@@ -399,34 +466,23 @@ function Membership() {
                 <div>
 
                   <p className="text-[9px] tracking-[0.25em] text-[#ccff00]">
-
                     {isFreeTrial
                       ? "30-DAY FREE TRIAL"
                       : "MEMBERSHIP ACTIVE"}
-
                   </p>
 
                   <h2 className="text-2xl font-black mt-2">
-
                     PERFORMANCE PROTOCOL ONLINE
-
                   </h2>
 
                   {isFreeTrial && (
-
                     <p className="text-xs text-white/40 mt-2">
-
-                      {status?.trial_days_remaining || 0}
-                      {" "}
+                      {status?.trial_days_remaining ||
+                        0}{" "}
                       day(s) remaining.
-
-                      <br />
-
                       After the trial, choose a paid
-                      protocol below.
-
+                      protocol.
                     </p>
-
                   )}
 
                 </div>
@@ -434,26 +490,21 @@ function Membership() {
                 <div className="text-left md:text-right">
 
                   <p className="text-sm font-bold">
-
                     {status?.membership?.plan_name ||
                       (isFreeTrial
                         ? "X-FIT Free Trial"
                         : "Membership")}
-
                   </p>
 
                   {status?.membership?.expires_at && (
-
                     <p className="text-[10px] text-white/35 mt-1">
-
                       ACCESS UNTIL{" "}
-
                       {new Date(
                         status.membership.expires_at
-                      ).toLocaleDateString("en-IN")}
-
+                      ).toLocaleDateString(
+                        "en-IN"
+                      )}
                     </p>
-
                   )}
 
                 </div>
@@ -461,7 +512,6 @@ function Membership() {
               </div>
 
             </motion.div>
-
           )}
 
           {/* =================================================
@@ -469,7 +519,6 @@ function Membership() {
           ================================================== */}
 
           {trialExpired && !isActive && (
-
             <motion.div
               initial={{
                 opacity: 0,
@@ -491,15 +540,13 @@ function Membership() {
               </h2>
 
               <p className="text-xs text-white/40 mt-2">
-
                 Your 30-day free access has ended.
-                Select a paid membership below and submit
-                your X-FIT UPI payment for manual verification.
-
+                Select a paid membership below and
+                submit your X-FIT UPI payment for
+                manual verification.
               </p>
 
             </motion.div>
-
           )}
 
           {/* =================================================
@@ -507,7 +554,6 @@ function Membership() {
           ================================================== */}
 
           {error && (
-
             <div className="mb-8 rounded-xl border border-red-500/20 bg-red-500/[0.04] px-5 py-4">
 
               <p className="text-[10px] tracking-[0.12em] text-red-400">
@@ -515,7 +561,6 @@ function Membership() {
               </p>
 
             </div>
-
           )}
 
           {/* =================================================
@@ -523,7 +568,6 @@ function Membership() {
           ================================================== */}
 
           {message && (
-
             <div className="mb-8 rounded-xl border border-[#ccff00]/20 bg-[#ccff00]/[0.04] px-5 py-4">
 
               <p className="text-[10px] tracking-[0.12em] text-[#ccff00]">
@@ -531,7 +575,6 @@ function Membership() {
               </p>
 
             </div>
-
           )}
 
           {/* =================================================
@@ -547,9 +590,7 @@ function Membership() {
                 <div className="w-10 h-10 rounded-full border-2 border-[#ccff00]/20 border-t-[#ccff00] animate-spin mx-auto" />
 
                 <p className="mt-5 text-[9px] tracking-[0.25em] text-white/30">
-
                   LOADING MEMBERSHIP SYSTEM
-
                 </p>
 
               </div>
@@ -564,185 +605,209 @@ function Membership() {
                   PLANS
               ================================================== */}
 
-              <section>
+              {isFreeTrial ? (
 
-                {/* UPI INFORMATION */}
+                <section className="mb-12">
 
-                <div className="mb-6 rounded-2xl border border-[#ccff00]/15 bg-[#ccff00]/[0.025] p-5">
+                  <div className="rounded-3xl border border-[#ccff00]/20 bg-[#ccff00]/[0.03] p-8 text-center">
 
-                  <p className="text-[9px] tracking-[0.25em] text-[#ccff00]">
-                    X-FIT UPI PAYMENT
-                  </p>
-
-                  <p className="text-xs text-white/45 mt-2 leading-relaxed">
-
-                    Pay the selected amount using the
-                    X-FIT UPI method, then press the
-                    payment button.
-
-                    <br />
-
-                    Your membership stays pending until
-                    the payment is manually verified.
-
-                  </p>
-
-                </div>
-
-                {/* PLAN TITLE */}
-
-                <div className="flex items-end justify-between mb-6">
-
-                  <div>
-
-                    <p className="text-[9px] tracking-[0.25em] text-white/30">
-                      SELECT PROTOCOL
+                    <p className="text-[9px] tracking-[0.3em] text-[#ccff00]">
+                      PAYMENT NOT REQUIRED
                     </p>
 
-                    <h2 className="text-2xl md:text-3xl font-black mt-2">
-                      MEMBERSHIP PLANS
+                    <h2 className="text-3xl font-black mt-3">
+                      YOUR 30-DAY FREE ACCESS IS ACTIVE
                     </h2>
+
+                    <p className="text-sm text-white/40 mt-3 max-w-xl mx-auto leading-relaxed">
+                      You can use X-FIT free for your
+                      first 30 days. No UPI payment is
+                      required right now. Paid membership
+                      plans will become available after
+                      your free trial ends.
+                    </p>
+
+                    <div className="mt-6 inline-flex items-center gap-3 rounded-full border border-[#ccff00]/20 bg-black/40 px-5 py-3">
+
+                      <span className="w-2 h-2 rounded-full bg-[#ccff00]" />
+
+                      <span className="text-xs font-bold text-[#ccff00]">
+                        {status?.trial_days_remaining ??
+                          status?.remaining_days ??
+                          0}{" "}
+                        DAYS REMAINING
+                      </span>
+
+                    </div>
 
                   </div>
 
-                  <span className="hidden md:block text-[8px] tracking-[0.2em] text-[#ccff00]/60">
+                </section>
 
-                    UPI PAYMENT • MANUAL VERIFICATION
+              ) : (
 
-                  </span>
+                <section>
 
-                </div>
+                  {/* UPI INFORMATION */}
 
-                {/* PLANS */}
+                  <div className="mb-6 rounded-2xl border border-[#ccff00]/15 bg-[#ccff00]/[0.025] p-5">
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                    <p className="text-[9px] tracking-[0.25em] text-[#ccff00]">
+                      X-FIT UPI PAYMENT
+                    </p>
 
-                  {plans.map((plan, index) => {
+                    <p className="text-xs text-white/45 mt-2 leading-relaxed">
+                      Select a membership plan. A payment
+                      window will open with the QR code.
+                      Complete the UPI payment and then
+                      submit it for manual verification.
+                    </p>
 
-                    const planName =
-                      plan.plan ||
-                      plan.id ||
-                      plan.name;
+                  </div>
 
-                    return (
+                  {/* SECTION TITLE */}
 
-                      <motion.div
-                        key={planName || index}
-                        initial={{
-                          opacity: 0,
-                          y: 25,
-                        }}
-                        animate={{
-                          opacity: 1,
-                          y: 0,
-                        }}
-                        transition={{
-                          delay: index * 0.08,
-                        }}
-                        whileHover={{
-                          y: -6,
-                        }}
-                        className="relative group"
-                      >
+                  <div className="flex items-end justify-between mb-6">
 
-                        <div className="absolute inset-0 rounded-3xl bg-[#ccff00]/[0.025] blur-xl opacity-0 group-hover:opacity-100 transition" />
+                    <div>
 
-                        <div className="relative h-full rounded-3xl border border-white/10 bg-black/65 backdrop-blur-xl p-7 overflow-hidden">
+                      <p className="text-[9px] tracking-[0.25em] text-white/30">
+                        SELECT PROTOCOL
+                      </p>
 
-                          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#ccff00]/50 to-transparent opacity-50" />
+                      <h2 className="text-2xl md:text-3xl font-black mt-2">
+                        MEMBERSHIP PLANS
+                      </h2>
 
-                          {/* PLAN HEADER */}
+                    </div>
 
-                          <div className="flex items-center justify-between">
+                    <span className="hidden md:block text-[8px] tracking-[0.2em] text-[#ccff00]/60">
+                      UPI PAYMENT • MANUAL VERIFICATION
+                    </span>
 
-                            <span className="text-[9px] tracking-[0.25em] text-[#ccff00]">
+                  </div>
 
-                              PROTOCOL 0{index + 1}
+                  {/* PLAN CARDS */}
 
-                            </span>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
 
-                            <span className="text-[8px] tracking-[0.15em] text-white/25">
+                    {plans.map((plan, index) => {
 
-                              {getDuration(plan)}
+                      const planName =
+                        plan.plan ||
+                        plan.id ||
+                        plan.name;
 
-                            </span>
+                      return (
 
-                          </div>
+                        <motion.div
+                          key={
+                            planName || index
+                          }
+                          initial={{
+                            opacity: 0,
+                            y: 25,
+                          }}
+                          animate={{
+                            opacity: 1,
+                            y: 0,
+                          }}
+                          transition={{
+                            delay:
+                              index * 0.08,
+                          }}
+                          whileHover={{
+                            y: -6,
+                          }}
+                          className="relative group"
+                        >
 
-                          {/* PLAN NAME */}
+                          <div className="absolute inset-0 rounded-3xl bg-[#ccff00]/[0.025] blur-xl opacity-0 group-hover:opacity-100 transition" />
 
-                          <h3 className="text-3xl font-black mt-7">
+                          <div className="relative h-full rounded-3xl border border-white/10 bg-black/65 backdrop-blur-xl p-7 overflow-hidden">
 
-                            {formatPlanName(planName)}
+                            <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#ccff00]/50 to-transparent opacity-50" />
 
-                          </h3>
+                            <div className="flex items-center justify-between">
 
-                          {/* PRICE */}
+                              <span className="text-[9px] tracking-[0.25em] text-[#ccff00]">
+                                PROTOCOL 0
+                                {index + 1}
+                              </span>
 
-                          <div className="mt-6">
+                              <span className="text-[8px] tracking-[0.15em] text-white/25">
+                                {getDuration(
+                                  plan
+                                )}
+                              </span>
 
-                            <span className="text-5xl font-black text-[#ccff00]">
+                            </div>
 
-                              {formatAmount(
-                                plan.amount
+                            <h3 className="text-3xl font-black mt-7">
+                              {formatPlanName(
+                                planName
                               )}
+                            </h3>
 
-                            </span>
+                            <div className="mt-6">
 
-                            <span className="text-xs text-white/25 ml-2">
-                              INR
-                            </span>
+                              <span className="text-5xl font-black text-[#ccff00]">
+                                {formatAmount(
+                                  getPaymentAmount(
+                                    plan
+                                  )
+                                )}
+                              </span>
+
+                              <span className="text-xs text-white/25 ml-2">
+                                INR
+                              </span>
+
+                            </div>
+
+                            <div className="mt-7 space-y-3 border-t border-white/10 pt-6">
+
+                              <Feature text="Workout performance tracking" />
+
+                              <Feature text="Nutrition protocol access" />
+
+                              <Feature text="MotionCheck analysis" />
+
+                              <Feature text="Progress DNA analytics" />
+
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openPayment(
+                                  plan
+                                )
+                              }
+                              disabled={processing}
+                              className="w-full mt-8 py-4 rounded-xl bg-[#ccff00] text-black font-black text-xs tracking-[0.15em] hover:shadow-[0_0_35px_rgba(204,255,0,0.2)] transition disabled:opacity-40"
+                            >
+                              {processing
+                                ? "PROCESSING..."
+                                : "PAY USING UPI →"}
+                            </button>
+
+                            <p className="text-center text-[7px] tracking-[0.12em] text-white/20 mt-3">
+                              PAY USING X-FIT UPI • MANUAL VERIFICATION
+                            </p>
 
                           </div>
 
-                          {/* FEATURES */}
+                        </motion.div>
 
-                          <div className="mt-7 space-y-3 border-t border-white/10 pt-6">
+                      );
+                    })}
 
-                            <Feature text="Workout performance tracking" />
+                  </div>
 
-                            <Feature text="Nutrition protocol access" />
+                </section>
 
-                            <Feature text="MotionCheck analysis" />
-
-                            <Feature text="Progress DNA analytics" />
-
-                          </div>
-
-                          {/* PAYMENT BUTTON */}
-
-                          <button
-                            onClick={() =>
-                              startPayment(plan)
-                            }
-                            disabled={processing}
-                            className="w-full mt-8 py-4 rounded-xl bg-[#ccff00] text-black font-black text-xs tracking-[0.15em] hover:shadow-[0_0_35px_rgba(204,255,0,0.2)] transition disabled:opacity-40"
-                          >
-
-                            {processing
-                              ? "PROCESSING..."
-                              : "SUBMIT UPI PAYMENT →"}
-
-                          </button>
-
-                          <p className="text-center text-[7px] tracking-[0.12em] text-white/20 mt-3">
-
-                            PAY USING X-FIT UPI •
-                            MANUAL VERIFICATION
-
-                          </p>
-
-                        </div>
-
-                      </motion.div>
-
-                    );
-
-                  })}
-
-                </div>
-
-              </section>
+              )}
 
               {/* =================================================
                   PAYMENT HISTORY
@@ -767,9 +832,8 @@ function Membership() {
                   <div className="rounded-2xl border border-white/10 bg-black/50 p-8">
 
                     <p className="text-xs text-white/30">
-
-                      No membership transactions recorded.
-
+                      No membership transactions
+                      recorded.
                     </p>
 
                   </div>
@@ -778,66 +842,64 @@ function Membership() {
 
                   <div className="rounded-2xl border border-white/10 bg-black/55 overflow-hidden">
 
-                    {history.map((item, index) => (
+                    {history.map(
+                      (item, index) => (
 
-                      <div
-                        key={item.id || index}
-                        className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 px-5 md:px-7 py-5 border-b border-white/5 last:border-b-0"
-                      >
+                        <div
+                          key={
+                            item.id || index
+                          }
+                          className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 px-5 md:px-7 py-5 border-b border-white/5 last:border-b-0"
+                        >
 
-                        <div>
+                          <div>
 
-                          <p className="font-bold text-sm">
+                            <p className="font-bold text-sm">
+                              {formatPlanName(
+                                item.plan
+                              )}
+                            </p>
 
-                            {formatPlanName(
-                              item.plan
-                            )}
+                            <p className="text-[9px] text-white/25 mt-1 tracking-[0.1em]">
+                              {item.created_at
+                                ? new Date(
+                                    item.created_at
+                                  ).toLocaleString(
+                                    "en-IN"
+                                  )
+                                : "TRANSACTION"}
+                            </p>
 
-                          </p>
+                          </div>
 
-                          <p className="text-[9px] text-white/25 mt-1 tracking-[0.1em]">
+                          <div className="flex items-center gap-5">
 
-                            {item.created_at
-                              ? new Date(
-                                  item.created_at
-                                ).toLocaleString(
-                                  "en-IN"
-                                )
-                              : "TRANSACTION"}
+                            <span className="text-sm font-black text-[#ccff00]">
+                              {formatAmount(
+                                item.amount
+                              )}
+                            </span>
 
-                          </p>
+                            <span
+                              className={`text-[8px] tracking-[0.15em] px-3 py-1.5 rounded-full border ${
+                                item.status ===
+                                "paid"
+                                  ? "border-[#ccff00]/20 text-[#ccff00] bg-[#ccff00]/5"
+                                  : "border-white/10 text-white/30"
+                              }`}
+                            >
+                              {String(
+                                item.status ||
+                                  "UNKNOWN"
+                              ).toUpperCase()}
+                            </span>
+
+                          </div>
 
                         </div>
 
-                        <div className="flex items-center gap-5">
-
-                          <span className="text-sm font-black text-[#ccff00]">
-
-                            {formatAmount(
-                              item.amount
-                            )}
-
-                          </span>
-
-                          <span
-                            className={`text-[8px] tracking-[0.15em] px-3 py-1.5 rounded-full border ${
-                              item.status === "paid"
-                                ? "border-[#ccff00]/20 text-[#ccff00] bg-[#ccff00]/5"
-                                : "border-white/10 text-white/30"
-                            }`}
-                          >
-
-                            {String(
-                              item.status || "UNKNOWN"
-                            ).toUpperCase()}
-
-                          </span>
-
-                        </div>
-
-                      </div>
-
-                    ))}
+                      )
+                    )}
 
                   </div>
 
@@ -850,21 +912,211 @@ function Membership() {
           )}
 
           {/* =================================================
+              UPI PAYMENT MODAL
+          ================================================== */}
+
+          {selectedPlan && !isFreeTrial && (
+
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-5 bg-black/80 backdrop-blur-md">
+
+              <motion.div
+                initial={{
+                  opacity: 0,
+                  scale: 0.96,
+                  y: 15,
+                }}
+                animate={{
+                  opacity: 1,
+                  scale: 1,
+                  y: 0,
+                }}
+                className="relative w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-3xl border border-[#ccff00]/25 bg-[#080808] p-6 md:p-8 shadow-[0_0_80px_rgba(204,255,0,0.08)]"
+              >
+
+                {/* CLOSE */}
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSelectedPlan(null)
+                  }
+                  disabled={processing}
+                  className="absolute right-5 top-5 w-9 h-9 rounded-full border border-white/10 text-white/50 hover:text-[#ccff00] hover:border-[#ccff00]/30"
+                >
+                  ×
+                </button>
+
+                {/* TITLE */}
+
+                <p className="text-[9px] tracking-[0.3em] text-[#ccff00]">
+                  X-FIT UPI PAYMENT
+                </p>
+
+                <h2 className="text-3xl font-black mt-3">
+                  COMPLETE PAYMENT
+                </h2>
+
+                {/* SELECTED PLAN */}
+
+                <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.02] p-5 flex items-center justify-between gap-4">
+
+                  <div>
+
+                    <p className="text-[9px] tracking-[0.2em] text-white/30">
+                      SELECTED PROTOCOL
+                    </p>
+
+                    <p className="text-lg font-black mt-1">
+                      {formatPlanName(
+                        getPlanKey(
+                          selectedPlan
+                        )
+                      )}
+                    </p>
+
+                  </div>
+
+                  <p className="text-2xl font-black text-[#ccff00]">
+                    {formatAmount(
+                      getPaymentAmount(
+                        selectedPlan
+                      )
+                    )}
+                  </p>
+
+                </div>
+
+                {/* QR CODE */}
+
+                <div className="mt-6 rounded-2xl border border-[#ccff00]/15 bg-white p-5 flex justify-center">
+
+                  {getQrUrl(selectedPlan) ? (
+
+                    <img
+                      src={getQrUrl(
+                        selectedPlan
+                      )}
+                      alt="X-FIT UPI payment QR code"
+                      className="w-[260px] h-[260px] object-contain rounded-xl"
+                    />
+
+                  ) : (
+
+                    <div className="w-[260px] h-[260px] flex items-center justify-center text-center text-black/60 text-sm font-semibold p-5">
+                      UPI QR is not configured
+                      yet. Add
+                      VITE_XFIT_UPI_ID to your
+                      frontend environment.
+                    </div>
+
+                  )}
+
+                </div>
+
+                {/* UPI ID */}
+
+                <div className="mt-5 text-center">
+
+                  <p className="text-[9px] tracking-[0.25em] text-white/30">
+                    SCAN & PAY USING ANY UPI APP
+                  </p>
+
+                  {upiId && (
+                    <p className="mt-2 text-sm font-bold text-white/70">
+
+                      UPI ID:{" "}
+
+                      <span className="text-[#ccff00]">
+                        {upiId}
+                      </span>
+
+                    </p>
+                  )}
+
+                </div>
+
+                {/* OPEN UPI APP */}
+
+                {getUpiLink(selectedPlan) && (
+
+                  <a
+                    href={getUpiLink(
+                      selectedPlan
+                    )}
+                    className="block w-full mt-5 py-3 rounded-xl border border-[#ccff00]/30 text-center text-[#ccff00] font-black text-xs tracking-[0.12em] hover:bg-[#ccff00]/10"
+                  >
+                    OPEN UPI APP →
+                  </a>
+
+                )}
+
+                {/* INSTRUCTIONS */}
+
+                <p className="mt-5 text-[10px] text-white/35 text-center leading-relaxed">
+
+                  Complete the payment first.
+                  Then press{" "}
+
+                  <b className="text-white/60">
+                    I HAVE PAID
+                  </b>
+
+                  . Your membership will remain
+                  pending until an X-FIT admin
+                  manually verifies the payment.
+
+                </p>
+
+                {/* SUBMIT PAYMENT */}
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    startPayment(
+                      selectedPlan
+                    )
+                  }
+                  disabled={
+                    processing ||
+                    !upiId
+                  }
+                  className="w-full mt-6 py-4 rounded-xl bg-[#ccff00] text-black font-black text-xs tracking-[0.15em] hover:shadow-[0_0_35px_rgba(204,255,0,0.2)] transition disabled:opacity-40"
+                >
+
+                  {processing
+                    ? "SUBMITTING..."
+                    : "I HAVE PAID →"}
+
+                </button>
+
+                {!upiId && (
+
+                  <p className="mt-3 text-center text-[9px] text-red-400">
+                    Add VITE_XFIT_UPI_ID in
+                    Vercel Environment Variables
+                    before deploying.
+                  </p>
+
+                )}
+
+              </motion.div>
+
+            </div>
+
+          )}
+
+          {/* =================================================
               FOOTER
           ================================================== */}
 
           <div className="mt-20 pt-7 border-t border-white/5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
 
             <p className="text-[8px] tracking-[0.2em] text-white/20">
-
               X-FIT // ATHLETE PERFORMANCE OPERATING SYSTEM
-
             </p>
 
             <p className="text-[8px] tracking-[0.15em] text-white/15">
-
-              X-FIT UPI PAYMENT SYSTEM
-
+              PAYMENT INFRASTRUCTURE
             </p>
 
           </div>
@@ -877,9 +1129,9 @@ function Membership() {
   );
 }
 
-// ===========================================================
+// =========================================================
 // FEATURE COMPONENT
-// ===========================================================
+// =========================================================
 
 function Feature({ text }) {
   return (
