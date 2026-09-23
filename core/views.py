@@ -3102,7 +3102,7 @@ MEMBERSHIP_PLANS = {
     },
     "yearly": {
         "name": "X-FIT Yearly",
-        "amount": 700,
+        "amount": 600,
         "days": 365,
     },
 }
