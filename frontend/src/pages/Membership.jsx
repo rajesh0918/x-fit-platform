@@ -139,7 +139,10 @@ function Membership() {
   };
 
   const openPayment = (plan) => {
-    if (isFreeTrial) return;
+    if (isFreeTrial) {
+      setError("Payment will be available after your 30-day free trial.");
+      return;
+    }
 
     setError("");
     setMessage("");
@@ -483,31 +486,22 @@ function Membership() {
             </div>
           ) : (
             <>
-              {/* PLANS */}
-              {isFreeTrial ? (
-                <section className="mb-12">
-                  <div className="rounded-3xl border border-[#ccff00]/20 bg-[#ccff00]/[0.03] p-8 text-center">
-                    <p className="text-[9px] tracking-[0.3em] text-[#ccff00]">
-                      PAYMENT NOT REQUIRED
-                    </p>
-                    <h2 className="text-3xl font-black mt-3">
-                      YOUR 30-DAY FREE ACCESS IS ACTIVE
-                    </h2>
-                    <p className="text-sm text-white/40 mt-3 max-w-xl mx-auto leading-relaxed">
-                      You can use X-FIT free for your first 30 days.
-                      No UPI payment is required right now. Paid membership
-                      plans will become available after your free trial ends.
-                    </p>
-                    <div className="mt-6 inline-flex items-center gap-3 rounded-full border border-[#ccff00]/20 bg-black/40 px-5 py-3">
-                      <span className="w-2 h-2 rounded-full bg-[#ccff00]" />
-                      <span className="text-xs font-bold text-[#ccff00]">
-                        {status?.trial_days_remaining ?? status?.remaining_days ?? 0} DAYS REMAINING
-                      </span>
-                    </div>
-                  </div>
-                </section>
-              ) : (
+              {/* PLANS — ALWAYS VISIBLE */}
               <section>
+                {isFreeTrial && (
+                  <div className="mb-8 rounded-2xl border border-[#ccff00]/20 bg-[#ccff00]/[0.03] p-5">
+                    <p className="text-[9px] tracking-[0.3em] text-[#ccff00]">
+                      30-DAY FREE ACCESS ACTIVE
+                    </p>
+                    <p className="text-sm text-white/45 mt-2 leading-relaxed">
+                      Your X-FIT access is free during the first 30 days. The membership plans and prices are visible now. Payment becomes available after the free trial ends.
+                    </p>
+                    <p className="text-xs font-bold text-[#ccff00] mt-3">
+                      {status?.trial_days_remaining ?? status?.remaining_days ?? 0} DAYS REMAINING • MONTHLY ₹100 • HALF-YEARLY ₹400 • YEARLY ₹600
+                    </p>
+                  </div>
+                )}
+
                 <div className="mb-6 rounded-2xl border border-[#ccff00]/15 bg-[#ccff00]/[0.025] p-5">
                   <p className="text-[9px] tracking-[0.25em] text-[#ccff00]">
                     X-FIT UPI PAYMENT
@@ -608,6 +602,8 @@ function Membership() {
                           >
                             {processing
                               ? "PROCESSING..."
+                              : isFreeTrial
+                              ? "AVAILABLE AFTER FREE TRIAL"
                               : "PAY USING UPI →"}
                           </button>
 
@@ -620,7 +616,6 @@ function Membership() {
                   })}
                 </div>
               </section>
-              )}
 
               {/* PAYMENT HISTORY */}
               <section className="mt-20">
