@@ -748,6 +748,29 @@ class Membership(models.Model):
         null=True
     )
 
+    # Persistent payment proof for Vercel/serverless deployments.
+    # The ImageField above is kept for compatibility, but these fields
+    # store the uploaded screenshot directly in PostgreSQL.
+    payment_screenshot_data = models.BinaryField(
+        blank=True,
+        null=True,
+        editable=False
+    )
+
+    payment_screenshot_name = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True,
+        editable=False
+    )
+
+    payment_screenshot_type = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        editable=False
+    )
+
     # =====================================================
     # MEMBERSHIP PERIOD
     # =====================================================
